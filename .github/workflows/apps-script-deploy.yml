@@ -60,16 +60,13 @@ jobs:
           clasp --version
           test -f .clasp.json
           test -f apps-script/appsscript.json
-
           node <<'NODE'
           const fs = require('fs');
           const clasp = JSON.parse(fs.readFileSync('.clasp.json', 'utf8'));
           const manifest = JSON.parse(fs.readFileSync('apps-script/appsscript.json', 'utf8'));
-
           if (!clasp.scriptId) throw new Error('.clasp.json is missing scriptId');
           if (clasp.rootDir !== 'apps-script') throw new Error('.clasp.json rootDir must be "apps-script"');
           if (!manifest.runtimeVersion) console.warn('Warning: appsscript.json has no runtimeVersion');
-
           console.log('clasp configuration and manifest are valid');
           NODE
 
@@ -89,19 +86,29 @@ jobs:
 
       - name: Push source to Apps Script
         run: |
+          set -euo pipefail
           clasp status
-          clasp push --force --debug
+          clasp push --force
 
-      - name: Discover and publish production deployment
+      - name: Check existing deployments
         run: |
           set -euo pipefail
-          deployments="$(clasp list-deployments 2>&1 || true)"
+          if ! deployments="$(clasp list-deployments 2>&1)"; then
+            echo 'Unable to list Apps Script deployments.'
+            echo "$deployments"
+            exit 1
+          fi
           echo "$deployments"
+
+      - name: Publish production deployment
+        run: |
+          set -euo pipefail
+          deployments="$(clasp list-deployments 2>&1)"
           deployment_id="$(printf '%s\n' "$deployments" | grep -oE 'AKfycb[A-Za-z0-9_-]+' | head -n 1 || true)"
           if [ -n "$deployment_id" ]; then
-            echo "Updating existing deployment."
+            echo "Updating existing production deployment."
             clasp update-deployment "$deployment_id" --description "GitHub Actions ${GITHUB_SHA::7}"
           else
-            echo "No existing deployment detected; creating production deployment."
+            echo "No existing deployment found; creating a new production deployment."
             clasp deploy --description "Production ${GITHUB_SHA::7}"
           fi
