@@ -6,6 +6,7 @@
  * IMPORTANT:
  * - setupDatabaseSchema() membuat sheet/header baru.
  * - migrateDatabaseSchema() aman dijalankan pada spreadsheet yang sudah berisi data.
+ * - migrateHandoverSchema() adalah migration ringan khusus HANDOVER.
  */
 
 function getDatabaseSchemaConfig_() {
@@ -147,8 +148,52 @@ function migrateDatabaseSchema() {
     sheet.setFrozenRows(1);
   });
 
+  SpreadsheetApp.flush();
   Logger.log('Database schema migration complete: ' + (changes.length ? changes.join(' | ') : 'no changes needed'));
   return changes;
+}
+
+/**
+ * Migration ringan khusus HANDOVER.
+ * Gunakan fungsi ini jika migrateDatabaseSchema() gagal/timeout.
+ * Tidak menyentuh sheet lain dan tidak menghapus data lama.
+ */
+function migrateHandoverSchema() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('HANDOVER');
+  if (!sheet) throw new Error('Sheet HANDOVER tidak ditemukan. Jalankan setupDatabaseSchema terlebih dahulu.');
+
+  const requiredHeaders = [
+    'handover_id', 'manifest_id', 'seller_id', 'seller_name', 'handover_at',
+    'handover_by', 'photo_file_id', 'photo_url', 'signature_file_id',
+    'signature_url', 'notes', 'status'
+  ];
+
+  const lastColumn = Math.max(sheet.getLastColumn(), 1);
+  const existingHeaders = sheet.getRange(1, 1, 1, lastColumn).getValues()[0]
+    .map(function(h) { return String(h || '').trim(); });
+  const existingSet = {};
+  existingHeaders.forEach(function(h) {
+    if (h) existingSet[h.toLowerCase()] = true;
+  });
+
+  const added = [];
+  requiredHeaders.forEach(function(header) {
+    if (!existingSet[header.toLowerCase()]) {
+      const newColumn = sheet.getLastColumn() + 1;
+      sheet.getRange(1, newColumn).setValue(header);
+      sheet.getRange(1, newColumn)
+        .setFontWeight('bold')
+        .setBackground('#f3f4f6');
+      existingSet[header.toLowerCase()] = true;
+      added.push(header);
+    }
+  });
+
+  sheet.setFrozenRows(1);
+  SpreadsheetApp.flush();
+  Logger.log(added.length ? 'HANDOVER schema updated: ' + added.join(', ') : 'HANDOVER schema sudah lengkap.');
+  return added;
 }
 
 function seedDummyData() {
