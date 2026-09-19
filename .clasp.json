@@ -1,8 +1,4 @@
 {
   "scriptId": "1YHtnMxV5PeZDjWmPVDV5svMCICqgbqQpweAkJT2yWfeyeN5Q-R7UaGm",
-  "rootDir": "apps-script",
-  "filePushOrder": [
-    "appsscript.json",
-    "**/*.js"
-  ]
+  "rootDir": "apps-script"
 }
