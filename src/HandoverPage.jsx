@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, CheckCircle2, CheckSquare, ChevronLeft, Clock, FileText, Home, Loader2, X } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 
 const API_URL = 'https://script.google.com/macros/s/AKfycbxzFZV3HMqdRf8_sFQFCZ3qQcIhnRVEXLhzTYGD7OPjv-Q7khAvMdCk8jx90Ff9d10WUw/exec';
 
@@ -11,22 +11,23 @@ const navItems = [
   { path: '/history', icon: Clock, label: 'Riwayat' },
 ];
 
-const BottomNavigation = () => (
-  <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around items-center h-16 z-50 max-w-md mx-auto shadow-[0_-5px_10px_rgba(0,0,0,0.02)]">
-    {navItems.map(({ path, icon: Icon, label }) => (
-      <Link key={path} to={path} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${path === '/handover' ? 'text-[#D71920]' : 'text-gray-400'}`}>
-        <Icon size={24} strokeWidth={path === '/handover' ? 2.5 : 2} />
-        <span className={`text-[10px] font-semibold ${path === '/handover' ? 'text-[#D71920]' : 'text-gray-500'}`}>{label}</span>
-      </Link>
-    ))}
-  </div>
-);
-
 const getManifestId = (manifest) => manifest?.manifestNumber || manifest?.manifest_number || manifest?.id || '';
 const getSellerName = (manifest) => manifest?.sellerName || manifest?.seller_name || 'Seller';
 
+function BottomNavigation() {
+  return (
+    <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around items-center h-16 z-50 max-w-md mx-auto shadow-[0_-5px_10px_rgba(0,0,0,0.02)]">
+      {navItems.map(({ path, icon: Icon, label }) => (
+        <Link key={path} to={path} className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${path === '/handover' ? 'text-[#D71920]' : 'text-gray-400'}`}>
+          <Icon size={24} strokeWidth={path === '/handover' ? 2.5 : 2} />
+          <span className={`text-[10px] font-semibold ${path === '/handover' ? 'text-[#D71920]' : 'text-gray-500'}`}>{label}</span>
+        </Link>
+      ))}
+    </div>
+  );
+}
+
 export default function HandoverPage() {
-  const navigate = useNavigate();
   const [manifests, setManifests] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedManifest, setSelectedManifest] = useState(null);
@@ -66,11 +67,14 @@ export default function HandoverPage() {
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
-    canvas.width = Math.max(1, Math.round(rect.width * dpr));
-    canvas.height = Math.max(1, Math.round(rect.height * dpr));
+    const width = Math.max(1, Math.round(rect.width));
+    const height = Math.max(1, Math.round(rect.height));
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+
     const ctx = canvas.getContext('2d');
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.lineWidth = 2.2;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.lineWidth = 2.2 * dpr;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = '#111827';
@@ -78,7 +82,7 @@ export default function HandoverPage() {
 
   useEffect(() => {
     if (!selectedManifest) return undefined;
-    const timer = window.setTimeout(setupCanvas, 50);
+    const timer = window.setTimeout(setupCanvas, 80);
     const handleResize = () => {
       if (!drawingRef.current) setupCanvas();
     };
@@ -93,7 +97,12 @@ export default function HandoverPage() {
     const canvas = canvasRef.current;
     if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
-    return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+      x: (event.clientX - rect.left) * scaleX,
+      y: (event.clientY - rect.top) * scaleY
+    };
   };
 
   const startSignature = (event) => {
@@ -102,8 +111,13 @@ export default function HandoverPage() {
     const canvas = canvasRef.current;
     if (!point || !canvas) return;
     const ctx = canvas.getContext('2d');
+    const dpr = canvas.width / Math.max(1, canvas.getBoundingClientRect().width);
     ctx.beginPath();
     ctx.moveTo(point.x, point.y);
+    ctx.lineWidth = 2.2 * dpr;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#111827';
     drawingRef.current = true;
     try { canvas.setPointerCapture(event.pointerId); } catch (_) {}
   };
@@ -115,7 +129,8 @@ export default function HandoverPage() {
     const canvas = canvasRef.current;
     if (!point || !canvas) return;
     const ctx = canvas.getContext('2d');
-    ctx.lineWidth = 2.2;
+    const dpr = canvas.width / Math.max(1, canvas.getBoundingClientRect().width);
+    ctx.lineWidth = 2.2 * dpr;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = '#111827';
@@ -141,11 +156,12 @@ export default function HandoverPage() {
   };
 
   const openHandover = (manifest) => {
+    setSuccessData(null);
     setSelectedManifest(manifest);
     setPhotoPreview('');
     setSignature('');
     setErrorMessage('');
-    window.setTimeout(setupCanvas, 60);
+    window.setTimeout(setupCanvas, 100);
   };
 
   const closeHandover = () => {
@@ -166,7 +182,8 @@ export default function HandoverPage() {
 
   const submitHandover = async (event) => {
     event.preventDefault();
-    if (!selectedManifest) return;
+    if (!selectedManifest || isSubmitting) return;
+
     if (!photoPreview) {
       setErrorMessage('Foto bukti serah terima wajib diambil.');
       return;
@@ -179,7 +196,8 @@ export default function HandoverPage() {
     setIsSubmitting(true);
     setErrorMessage('');
 
-    const manifestNumber = getManifestId(selectedManifest);
+    const manifestSnapshot = selectedManifest;
+    const manifestNumber = getManifestId(manifestSnapshot);
     const savedUser = JSON.parse(localStorage.getItem('retur_user') || '{}');
 
     try {
@@ -199,7 +217,9 @@ export default function HandoverPage() {
       if (!result.success) throw new Error(result.message || 'Gagal menyelesaikan handover.');
 
       const data = result.data || {};
-      const pdfUrl = data.pdfUrl || selectedManifest.pdfUrl || selectedManifest.pdf_url || '';
+      const pdfUrl = data.pdfUrl || manifestSnapshot.pdfUrl || manifestSnapshot.pdf_url || '';
+      const finalManifestNumber = data.manifestNumber || manifestNumber;
+      const finalPhotoUrl = data.photoUrl || data.photo_url || '';
 
       setManifests((prev) => prev.filter((item) => getManifestId(item) !== manifestNumber));
       setSelectedManifest(null);
@@ -207,11 +227,13 @@ export default function HandoverPage() {
       setSignature('');
       drawingRef.current = false;
 
+      // Keep the success state independent from the handover form so the custom
+      // success modal cannot disappear when the form is closed/reset.
       setSuccessData({
-        manifestNumber: data.manifestNumber || manifestNumber,
+        manifestNumber: finalManifestNumber,
         handoverId: data.handoverId || '',
-        sellerName: getSellerName(selectedManifest),
-        photoUrl: data.photoUrl || data.photo_url || '',
+        sellerName: getSellerName(manifestSnapshot),
+        photoUrl: finalPhotoUrl,
         photoBase64: photoPreview,
         pdfUrl
       });
@@ -232,6 +254,7 @@ export default function HandoverPage() {
 
   const shareToWhatsApp = async () => {
     if (!successData) return;
+
     const caption = [
       'SERAH TERIMA MANIFEST RETUR',
       '',
@@ -244,7 +267,7 @@ export default function HandoverPage() {
 
     try {
       const photoFile = await createPhotoFile();
-      if (navigator.share && navigator.canShare && navigator.canShare({ files: [photoFile] })) {
+      if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [photoFile] }))) {
         await navigator.share({
           title: `Handover ${successData.manifestNumber}`,
           text: caption,
@@ -257,8 +280,14 @@ export default function HandoverPage() {
       console.error('Native share error:', error);
     }
 
+    // Browsers that cannot attach a local file still get the PDF caption/link.
     const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(caption)}`;
-    window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+    window.location.href = whatsappUrl;
+  };
+
+  const closeSuccessModal = () => {
+    setSuccessData(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   return (
@@ -271,9 +300,7 @@ export default function HandoverPage() {
       {errorMessage && (
         <div className="fixed inset-0 z-[300] bg-black/50 flex items-center justify-center p-5">
           <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl">
-            <div className="w-14 h-14 mx-auto rounded-full bg-red-50 flex items-center justify-center text-[#D71920]">
-              <X size={28} />
-            </div>
+            <div className="w-14 h-14 mx-auto rounded-full bg-red-50 flex items-center justify-center text-[#D71920]"><X size={28} /></div>
             <h3 className="text-lg font-bold text-gray-900 text-center mt-4">Terjadi Kesalahan</h3>
             <p className="text-sm text-gray-500 text-center mt-2">{errorMessage}</p>
             <button type="button" onClick={() => setErrorMessage('')} className="w-full mt-6 py-3.5 rounded-2xl bg-[#D71920] text-white font-bold">OKE</button>
@@ -317,7 +344,7 @@ export default function HandoverPage() {
                 <h2 className="text-xl font-bold text-gray-900">Serah Terima</h2>
                 <p className="text-xs text-gray-500 mt-1">{getManifestId(selectedManifest)}</p>
               </div>
-              <button type="button" onClick={closeHandover} className="text-sm text-gray-500">Tutup</button>
+              <button type="button" onClick={closeHandover} disabled={isSubmitting} className="text-sm text-gray-500 disabled:opacity-50">Tutup</button>
             </div>
 
             <form onSubmit={submitHandover} className="space-y-5">
@@ -365,9 +392,14 @@ export default function HandoverPage() {
       )}
 
       {successData && (
-        <div className="fixed inset-0 z-[200] bg-black/60 flex items-end justify-center backdrop-blur-sm">
-          <div className="w-full max-w-md bg-white rounded-t-[32px] p-5 max-h-[94vh] overflow-y-auto">
-            <div className="flex justify-center pt-2">
+        <div className="fixed inset-0 z-[500] bg-black/60 flex items-end justify-center backdrop-blur-sm">
+          <div className="w-full max-w-md bg-white rounded-t-[32px] p-5 max-h-[94vh] overflow-y-auto shadow-2xl">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-green-700 bg-green-50 px-3 py-1.5 rounded-full">BERHASIL</span>
+              <button type="button" onClick={closeSuccessModal} className="text-sm text-gray-500">Tutup</button>
+            </div>
+
+            <div className="flex justify-center pt-4">
               <div className="w-16 h-16 rounded-full bg-green-50 flex items-center justify-center">
                 <CheckCircle2 size={36} className="text-green-600" />
               </div>
@@ -400,26 +432,26 @@ export default function HandoverPage() {
               <p className="text-sm font-semibold text-gray-900 mb-2">Manifest PDF</p>
               {successData.pdfUrl ? (
                 <a href={successData.pdfUrl} target="_blank" rel="noreferrer" className="flex items-center justify-between p-4 rounded-2xl bg-red-50 border border-red-100">
-                  <div className="flex items-center">
-                    <FileText size={24} className="text-[#D71920] mr-3" />
-                    <div>
-                      <p className="font-semibold text-gray-900 text-sm">Manifest PDF</p>
-                      <p className="text-xs text-gray-500">Buka dokumen manifest</p>
+                  <div className="flex items-center min-w-0">
+                    <FileText size={24} className="text-[#D71920] mr-3 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="font-semibold text-gray-900 text-sm">Buka Manifest PDF</p>
+                      <p className="text-xs text-gray-500 truncate">{successData.pdfUrl}</p>
                     </div>
                   </div>
-                  <ChevronLeft size={20} className="rotate-180 text-[#D71920]" />
+                  <ChevronLeft size={20} className="rotate-180 text-[#D71920] shrink-0" />
                 </a>
               ) : (
-                <div className="p-4 rounded-2xl bg-gray-50 text-xs text-gray-500">Link PDF manifest tidak tersedia.</div>
+                <div className="p-4 rounded-2xl bg-gray-50 text-xs text-gray-500">Link PDF manifest belum tersedia dari server.</div>
               )}
             </div>
 
             <button type="button" onClick={shareToWhatsApp} className="w-full mt-5 py-4 rounded-2xl bg-[#25D366] text-white font-bold flex items-center justify-center active:scale-[0.99] transition-transform">
-              <span className="text-xl mr-2">💬</span> KIRIM KE WHATSAPP
+              <span className="text-xl mr-2">💬</span> KIRIM FOTO + LINK PDF KE WHATSAPP
             </button>
-            <p className="text-[11px] text-gray-400 text-center mt-2 px-3">Foto + caption link PDF akan dibagikan melalui menu share perangkat. Pilih WhatsApp.</p>
+            <p className="text-[11px] text-gray-400 text-center mt-2 px-3">Di Android yang mendukung berbagi file, pilih WhatsApp pada menu share agar foto ikut terlampir dan caption berisi link PDF.</p>
 
-            <button type="button" onClick={() => { setSuccessData(null); navigate('/handover', { replace: true }); }} className="w-full mt-4 py-3.5 rounded-2xl border border-gray-200 text-gray-700 font-bold">SELESAI</button>
+            <button type="button" onClick={closeSuccessModal} className="w-full mt-4 py-3.5 rounded-2xl border border-gray-200 text-gray-700 font-bold">SELESAI</button>
           </div>
         </div>
       )}
