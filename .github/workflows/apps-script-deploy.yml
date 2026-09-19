@@ -89,16 +89,16 @@ jobs:
           print("CLASPRC_JSON parsed successfully")
           PY
 
-      - name: Verify Apps Script project access
+      - name: Validate Apps Script web deployment target
+        env:
+          DEPLOYMENT_ID: AKfycbxzFZV3HMqdRf8_sFQFCZ3qQcIhnRVEXLhzTYGD7OPjv-Q7khAvMdCk8jx90Ff9d10WUw
         run: |
           set -euo pipefail
-          if ! deployments="$(clasp list-deployments 2>&1)"; then
-            echo "Unable to access the Apps Script project configured by .clasp.json."
-            echo "$deployments"
-            echo "Check that the scriptId belongs to the same Apps Script project/account as CLASPRC_JSON."
-            exit 1
-          fi
-          echo "$deployments"
+          test -n "$DEPLOYMENT_ID"
+          case "$DEPLOYMENT_ID" in
+            AKfycb*) echo "Using configured production deployment: ${DEPLOYMENT_ID:0:18}..." ;;
+            *) echo "Configured deployment ID does not look like an Apps Script deployment ID."; exit 1 ;;
+          esac
 
       - name: Push source to Apps Script
         run: |
@@ -126,15 +126,9 @@ jobs:
 
       - name: Publish production deployment
         env:
+          DEPLOYMENT_ID: AKfycbxzFZV3HMqdRf8_sFQFCZ3qQcIhnRVEXLhzTYGD7OPjv-Q7khAvMdCk8jx90Ff9d10WUw
           VERSION_NUMBER: ${{ steps.version.outputs.version_number }}
         run: |
           set -euo pipefail
-          deployments="$(clasp list-deployments 2>&1)"
-          deployment_id="$(printf '%s\n' "$deployments" | grep -oE 'AKfycb[A-Za-z0-9_-]+' | head -n 1 || true)"
-          if [ -n "$deployment_id" ]; then
-            echo "Updating existing production deployment to version $VERSION_NUMBER."
-            clasp update-deployment "$deployment_id" --versionNumber "$VERSION_NUMBER"
-          else
-            echo "No existing deployment found; creating production deployment."
-            clasp deploy --versionNumber "$VERSION_NUMBER" --description "Production ${GITHUB_SHA::7}"
-          fi
+          echo "Updating configured production deployment to version $VERSION_NUMBER."
+          clasp update-deployment "$DEPLOYMENT_ID" --versionNumber "$VERSION_NUMBER"
