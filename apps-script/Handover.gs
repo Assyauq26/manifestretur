@@ -105,6 +105,7 @@ function handleCompleteHandoverV2(requestData) {
     const manifestId = String(manifestRow[idx.manifest_id] || '');
     const sellerId = String(manifestRow[idx.seller_id] || '');
     const sellerName = String(manifestRow[idx.seller_name] || '');
+    const pdfUrl = String(manifestRow[idx.pdf_url] || '');
     const folder = getHandoverEvidenceFolderV2_(now, manifestNumber);
     const photoFile = saveHandoverEvidenceV2_(requestData.photoBase64, folder, manifestNumber + '_bukti');
     const signatureFile = saveHandoverEvidenceV2_(requestData.signatureBase64, folder, manifestNumber + '_signature');
@@ -145,7 +146,8 @@ function handleCompleteHandoverV2(requestData) {
         status: HANDOVER_COMPLETED_STATUS,
         handoverAt: now.toISOString(),
         photoUrl: photoFile.getUrl(),
-        signatureUrl: signatureFile.getUrl()
+        signatureUrl: signatureFile.getUrl(),
+        pdfUrl: pdfUrl
       }
     });
   } catch (error) {
