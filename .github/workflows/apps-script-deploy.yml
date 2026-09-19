@@ -59,7 +59,7 @@ jobs:
           chmod 600 "$HOME/.clasprc.json"
 
       - name: Install clasp
-        run: npm install --global @google/clasp@3.4.0
+        run: npm install --global @google/clasp@latest
 
       - name: Verify Apps Script project
         run: |
@@ -109,8 +109,9 @@ jobs:
 
       - name: Push source to Apps Script
         run: |
+          set -o pipefail
           clasp status
-          clasp push --force
+          clasp push --force --debug
 
       - name: Update existing production deployment
         env:
