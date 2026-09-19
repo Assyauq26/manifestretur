@@ -69,6 +69,7 @@ jobs:
           if (clasp.rootDir !== 'apps-script') throw new Error('.clasp.json rootDir must be "apps-script"');
           if (!manifest.runtimeVersion) console.warn('Warning: appsscript.json has no runtimeVersion');
           console.log('clasp configuration and manifest are valid');
+          console.log('scriptId:', clasp.scriptId);
           NODE
 
       - name: Check Apps Script files
@@ -88,6 +89,17 @@ jobs:
           print("CLASPRC_JSON parsed successfully")
           PY
 
+      - name: Verify Apps Script project access
+        run: |
+          set -euo pipefail
+          if ! deployments="$(clasp list-deployments 2>&1)"; then
+            echo "Unable to access the Apps Script project configured by .clasp.json."
+            echo "$deployments"
+            echo "Check that the scriptId belongs to the same Apps Script project/account as CLASPRC_JSON."
+            exit 1
+          fi
+          echo "$deployments"
+
       - name: Push source to Apps Script
         run: |
           set -euo pipefail
@@ -99,7 +111,6 @@ jobs:
         run: |
           set -euo pipefail
           DESCRIPTION="Production ${GITHUB_SHA::7}"
-          echo "Creating Apps Script version..."
           VERSION_OUTPUT="$(clasp version "$DESCRIPTION" 2>&1)"
           echo "$VERSION_OUTPUT"
           VERSION_NUMBER="$(printf '%s\n' "$VERSION_OUTPUT" | grep -oE 'Version [0-9]+' | tail -n 1 | awk '{print $2}' || true)"
@@ -113,28 +124,16 @@ jobs:
           echo "version_number=$VERSION_NUMBER" >> "$GITHUB_OUTPUT"
           echo "Using version: $VERSION_NUMBER"
 
-      - name: Discover production deployment
-        id: deployment
-        run: |
-          set -euo pipefail
-          deployments="$(clasp list-deployments 2>&1)" || {
-            echo "Unable to list Apps Script deployments."
-            echo "$deployments"
-            exit 1
-          }
-          echo "$deployments"
-          deployment_id="$(printf '%s\n' "$deployments" | grep -oE 'AKfycb[A-Za-z0-9_-]+' | head -n 1 || true)"
-          echo "deployment_id=$deployment_id" >> "$GITHUB_OUTPUT"
-
       - name: Publish production deployment
         env:
           VERSION_NUMBER: ${{ steps.version.outputs.version_number }}
-          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment_id }}
         run: |
           set -euo pipefail
-          if [ -n "$DEPLOYMENT_ID" ]; then
+          deployments="$(clasp list-deployments 2>&1)"
+          deployment_id="$(printf '%s\n' "$deployments" | grep -oE 'AKfycb[A-Za-z0-9_-]+' | head -n 1 || true)"
+          if [ -n "$deployment_id" ]; then
             echo "Updating existing production deployment to version $VERSION_NUMBER."
-            clasp update-deployment "$DEPLOYMENT_ID" --versionNumber "$VERSION_NUMBER"
+            clasp update-deployment "$deployment_id" --versionNumber "$VERSION_NUMBER"
           else
             echo "No existing deployment found; creating production deployment."
             clasp deploy --versionNumber "$VERSION_NUMBER" --description "Production ${GITHUB_SHA::7}"
