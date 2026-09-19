@@ -347,7 +347,7 @@ function escapePdfHtml_(value) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+    .replace(/\"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
 
@@ -379,50 +379,25 @@ function generatePdfDrive(
     'dd/MM/yyyy'
   );
 
-  const safeDropPoint =
-    escapePdfHtml_(user.drop_point_id || '');
-
-  const safeSprinter =
-    escapePdfHtml_(user.nama_sprinter || '');
-
-  const safeSprinterPhone =
-    escapePdfHtml_(user.no_hp || '');
-
-  const safeSeller =
-    escapePdfHtml_(sellerName || '');
-
-  const safeReceiver =
-    escapePdfHtml_(receiverName || '');
-
-  const safeSellerPhone =
-    escapePdfHtml_(sellerPhone || '');
+  const safeDropPoint = escapePdfHtml_(user.drop_point_id || '');
+  const safeSprinter = escapePdfHtml_(user.nama_sprinter || '');
+  const safeSprinterPhone = escapePdfHtml_(user.no_hp || '');
+  const safeSeller = escapePdfHtml_(sellerName || '');
+  const safeReceiver = escapePdfHtml_(receiverName || '');
+  const safeSellerPhone = escapePdfHtml_(sellerPhone || '');
 
   const totalRows = 40;
   const awbColumns = 5;
-
   let awbGridRows = '';
 
   for (let row = 0; row < totalRows; row++) {
     awbGridRows += '<tr>';
-
-    awbGridRows +=
-      '<td class="row-no">' +
-      (row + 1) +
-      '</td>';
+    awbGridRows += '<td class="row-no">' + (row + 1) + '</td>';
 
     for (let col = 0; col < awbColumns; col++) {
-      const index =
-        (row * awbColumns) + col;
-
-      const value =
-        index < awbs.length
-          ? escapePdfHtml_(awbs[index])
-          : '';
-
-      awbGridRows +=
-        '<td class="awb-cell">' +
-        value +
-        '</td>';
+      const index = (row * awbColumns) + col;
+      const value = index < awbs.length ? escapePdfHtml_(awbs[index]) : '';
+      awbGridRows += '<td class="awb-cell">' + value + '</td>';
     }
 
     awbGridRows += '</tr>';
@@ -435,19 +410,15 @@ function generatePdfDrive(
 <html>
 <head>
 <meta charset="UTF-8">
-
 <style>
   @page {
     size: A4 portrait;
     margin: 5mm 4.5mm 4.5mm 4.5mm;
   }
 
-  * {
-    box-sizing: border-box;
-  }
+  * { box-sizing: border-box; }
 
-  html,
-  body {
+  html, body {
     margin: 0;
     padding: 0;
     background: #ffffff;
@@ -457,9 +428,7 @@ function generatePdfDrive(
     line-height: 1.05;
   }
 
-  .page {
-    width: 100%;
-  }
+  .page { width: 100%; }
 
   .top {
     position: relative;
@@ -519,9 +488,7 @@ function generatePdfDrive(
     table-layout: fixed;
   }
 
-  .info-table {
-    margin-bottom: 2mm;
-  }
+  .info-table { margin-bottom: 2mm; }
 
   .info-table td {
     border: 0.35pt solid #777777;
@@ -540,19 +507,13 @@ function generatePdfDrive(
   }
 
   .info-table .label {
-    width: 22%;
+    width: 27%;
     font-weight: 700;
-    font-size: 7.25pt;
-  }
-
-  .info-table .colon {
-    width: 2%;
-    text-align: center;
-    font-weight: 700;
+    font-size: 7.15pt;
   }
 
   .info-table .value {
-    width: 26%;
+    width: 23%;
     font-size: 7.25pt;
   }
 
@@ -635,9 +596,7 @@ function generatePdfDrive(
     line-height: 1.18;
   }
 
-  .footer .line {
-    margin-top: 0.7mm;
-  }
+  .footer .line { margin-top: 0.7mm; }
 
   .thank {
     text-align: right;
@@ -653,9 +612,7 @@ function generatePdfDrive(
     font-weight: 700;
   }
 
-  .signature {
-    margin-top: 1mm;
-  }
+  .signature { margin-top: 1mm; }
 
   .signature td {
     width: 50%;
@@ -665,25 +622,13 @@ function generatePdfDrive(
     padding: 0 5mm;
   }
 
-  .signature .left {
-    text-align: left;
-  }
+  .signature .left { text-align: left; }
+  .signature .right { text-align: right; }
 
-  .signature .right {
-    text-align: right;
-  }
+  .sign-gap { height: 12.5mm; }
 
-  .sign-gap {
-    height: 12.5mm;
-  }
-
-  .sign-name {
-    font-weight: 700;
-  }
-
-  .small {
-    font-size: 6.8pt;
-  }
+  .sign-name { font-weight: 700; }
+  .small { font-size: 6.8pt; }
 </style>
 </head>
 
@@ -714,79 +659,29 @@ function generatePdfDrive(
 
   <table class="info-table">
     <tr>
-      <td class="section" colspan="3">
-        DATA DROPPOINT 网点明细
-      </td>
-
-      <td class="section" colspan="3">
-        DATA SELLER 卖家明细
-      </td>
+      <td class="section" colspan="2">DATA DROPPOINT 网点明细</td>
+      <td class="section" colspan="2">DATA SELLER 卖家明细</td>
     </tr>
 
     <tr>
-      <td class="label">
-        DROPPOINT 网点名称
-      </td>
-
-      <td class="colon">:</td>
-
-      <td class="value">
-        ${safeDropPoint}
-      </td>
-
-      <td class="label">
-        NAMA SELLER DI SISTEM 卖家名称
-      </td>
-
-      <td class="colon">:</td>
-
-      <td class="value">
-        ${safeSeller}
-      </td>
+      <td class="label">DROPPOINT 网点名称</td>
+      <td class="value">${safeDropPoint}</td>
+      <td class="label">NAMA SELLER DI SISTEM 卖家名称</td>
+      <td class="value">${safeSeller}</td>
     </tr>
 
     <tr>
-      <td class="label">
-        NAMA LENGKAP SPRINTER 名称
-      </td>
-
-      <td class="colon">:</td>
-
-      <td class="value">
-        ${safeSprinter}
-      </td>
-
-      <td class="label">
-        NAMA PENERIMA 名称
-      </td>
-
-      <td class="colon">:</td>
-
-      <td class="value">
-        ${safeReceiver}
-      </td>
+      <td class="label">NAMA LENGKAP SPRINTER 名称</td>
+      <td class="value">${safeSprinter}</td>
+      <td class="label">NAMA PENERIMA 名称</td>
+      <td class="value">${safeReceiver}</td>
     </tr>
 
     <tr>
-      <td class="label">
-        NO HP SPRINTER 电话号码
-      </td>
-
-      <td class="colon">:</td>
-
-      <td class="value">
-        ${safeSprinterPhone}
-      </td>
-
-      <td class="label">
-        NO HP 电话号码
-      </td>
-
-      <td class="colon">:</td>
-
-      <td class="value">
-        ${safeSellerPhone}
-      </td>
+      <td class="label">NO HP SPRINTER 电话号码</td>
+      <td class="value">${safeSprinterPhone}</td>
+      <td class="label">NO HP 电话号码</td>
+      <td class="value">${safeSellerPhone}</td>
     </tr>
   </table>
 
@@ -805,7 +700,6 @@ function generatePdfDrive(
         <th class="awb-head">AWB 面单号码</th>
       </tr>
     </thead>
-
     <tbody>
       ${awbGridRows}
     </tbody>
@@ -818,25 +712,14 @@ function generatePdfDrive(
   </div>
 
   <div class="footer">
-    <div>
-      Diatas adalah Data No AWB yang telah kami serahkan kepada PIC Seller.
-    </div>
-
-    <div class="line">
-      Form ini sebagai bukti untuk serah terima barang yang telah diretur oleh sprinter DP
-    </div>
-
-    <div class="line">
-      以上单号的货物已经交接给卖家的负责人并验收。这张表格是作为网点退回货物的证明而创建的
-    </div>
-
-    <div class="thank">
-      Terima kasih. 谢谢
-    </div>
+    <div>Diatas adalah Data No AWB yang telah kami serahkan kepada PIC Seller.</div>
+    <div class="line">Form ini sebagai bukti untuk serah terima barang yang telah diretur oleh sprinter DP</div>
+    <div class="line">以上单号的货物已经交接给卖家的负责人并验收。这张表格是作为网点退回货物的证明而创建的</div>
+    <div class="thank">Terima kasih. 谢谢</div>
   </div>
 
   <div class="city">
-    Semarang ,
+    Batang ,
   </div>
 
   <table class="signature">
@@ -848,15 +731,7 @@ function generatePdfDrive(
         <div class="sign-gap"></div>
 
         <div class="sign-name">
-          (${safeSprinter})
-        </div>
-
-        <div class="small">
-          (SPV DP/ADMIN/SPRINTER)
-        </div>
-
-        <div class="small">
-          主管/文员/快递员
+          ${safeSprinter}
         </div>
       </td>
 
@@ -886,31 +761,12 @@ function generatePdfDrive(
     .setName(manifestNumber + '.pdf')
     .getAs(MimeType.PDF);
 
-  const year = Utilities.formatDate(
-    now,
-    'Asia/Jakarta',
-    'yyyy'
-  );
-
-  const month = Utilities.formatDate(
-    now,
-    'Asia/Jakarta',
-    'MM'
-  );
-
-  const day = Utilities.formatDate(
-    now,
-    'Asia/Jakarta',
-    'dd'
-  );
+  const year = Utilities.formatDate(now, 'Asia/Jakarta', 'yyyy');
+  const month = Utilities.formatDate(now, 'Asia/Jakarta', 'MM');
+  const day = Utilities.formatDate(now, 'Asia/Jakarta', 'dd');
 
   const targetFolder = getOrCreateFolder(
-    'MANIFEST_RETUR/PDF/' +
-    year +
-    '/' +
-    month +
-    '/' +
-    day
+    'MANIFEST_RETUR/PDF/' + year + '/' + month + '/' + day
   );
 
   const file = targetFolder.createFile(blob);
@@ -931,11 +787,9 @@ function createJsonResponse(responseObj) {
     success: responseObj.success !== undefined
       ? responseObj.success
       : true,
-
     data: responseObj.data !== undefined
       ? responseObj.data
       : null,
-
     message: responseObj.message || ''
   };
 
