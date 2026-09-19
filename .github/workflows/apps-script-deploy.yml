@@ -30,7 +30,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Validate deployment secrets
         env:
@@ -44,7 +44,18 @@ jobs:
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
         run: |
-          printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
+          python3 - <<'PY'
+          import json, os, pathlib
+          raw = os.environ["CLASPRC_JSON"].strip()
+          try:
+              data = json.loads(raw)
+          except json.JSONDecodeError as e:
+              raise SystemExit(f"CLASPRC_JSON is invalid JSON: {e}")
+          pathlib.Path.home().joinpath(".clasprc.json").write_text(
+              json.dumps(data, separators=(",", ":"), ensure_ascii=False),
+              encoding="utf-8",
+          )
+          PY
           chmod 600 "$HOME/.clasprc.json"
 
       - name: Install clasp
@@ -55,6 +66,18 @@ jobs:
           clasp --version
           test -f .clasp.json
           test -f apps-script/appsscript.json
+
+      - name: Validate clasp credentials
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          path = pathlib.Path.home() / ".clasprc.json"
+          data = json.loads(path.read_text(encoding="utf-8"))
+          tokens = data.get("tokens", {})
+          if "default" not in tokens:
+              raise SystemExit("CLASPRC_JSON does not contain tokens.default")
+          print("CLASPRC_JSON parsed successfully")
+          PY
 
       - name: Push source to Apps Script
         run: clasp push --force
