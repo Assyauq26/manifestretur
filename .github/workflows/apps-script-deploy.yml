@@ -97,18 +97,10 @@ jobs:
 
       - name: Push source to Apps Script
         run: |
-          set -o pipefail
           clasp status
           clasp push --force --debug
 
-      - name: Enable Apps Script API
-        run: |
-          echo "Push succeeded. The clasp deployment command requires the Apps Script API."
-          echo "Enable it once at https://script.google.com/home/usersettings"
-          exit 0
-
       - name: Update existing production deployment
-        if: false
         env:
           CLASP_DEPLOYMENT_ID: ${{ secrets.CLASP_DEPLOYMENT_ID }}
         run: |
