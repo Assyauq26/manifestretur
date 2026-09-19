@@ -35,8 +35,10 @@ jobs:
       - name: Validate deployment secrets
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          CLASP_DEPLOYMENT_ID: ${{ secrets.CLASP_DEPLOYMENT_ID }}
         run: |
           test -n "$CLASPRC_JSON" || { echo 'Missing GitHub secret: CLASPRC_JSON'; exit 1; }
+          test -n "$CLASP_DEPLOYMENT_ID" || { echo 'Missing GitHub secret: CLASP_DEPLOYMENT_ID'; exit 1; }
 
       - name: Configure clasp authentication
         env:
@@ -44,8 +46,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, pathlib
-          raw = os.environ["CLASPRC_JSON"].strip()
-          data = json.loads(raw)
+          data = json.loads(os.environ["CLASPRC_JSON"].strip())
           pathlib.Path.home().joinpath(".clasprc.json").write_text(
               json.dumps(data, separators=(",", ":"), ensure_ascii=False),
               encoding="utf-8",
@@ -93,19 +94,13 @@ jobs:
           clasp status
           clasp push --force --debug
 
-      - name: Publish production deployment
+      - name: Update existing production deployment
         env:
-          SCRIPT_ID: ${{ secrets.APPS_SCRIPT_ID }}
+          CLASP_DEPLOYMENT_ID: ${{ secrets.CLASP_DEPLOYMENT_ID }}
         run: |
-          test -n "$SCRIPT_ID" || { echo 'Missing GitHub secret: APPS_SCRIPT_ID'; exit 1; }
-          curl --fail-with-body -sS             -X POST             -H "Authorization: Bearer $(python3 - <<'PY'
-          import json, pathlib
-          d=json.loads((pathlib.Path.home()/'.clasprc.json').read_text())
-          print(d['tokens']['default']['access_token'])
-          PY
-          )"             -H "Content-Type: application/json"             "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions"             -d '{"description":"GitHub Actions '"$GITHUB_SHA"'"}'
-
-      - name: Deployment reminder
-        if: failure()
-        run: |
-          echo "If source push succeeded but publishing failed, verify Apps Script API access and the APPS_SCRIPT_ID secret."
+          test -n "$CLASP_DEPLOYMENT_ID" || { echo 'Missing GitHub secret: CLASP_DEPLOYMENT_ID'; exit 1; }
+          case "$CLASP_DEPLOYMENT_ID" in
+            AKfycb*) ;;
+            *) echo "Invalid CLASP_DEPLOYMENT_ID format"; exit 1 ;;
+          esac
+          clasp update-deployment "$CLASP_DEPLOYMENT_ID" --description "GitHub Actions ${GITHUB_SHA::7}"
