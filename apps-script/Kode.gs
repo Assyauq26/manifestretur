@@ -9,9 +9,6 @@
 const PHASE7_READY_STATUS = 'READY_HANDOVER';
 const PHASE7_COMPLETED_STATUS = 'COMPLETED';
 
-/**
- * CORS preflight.
- */
 function doOptions(e) {
   return createJsonResponse({
     success: true,
@@ -19,13 +16,6 @@ function doOptions(e) {
   });
 }
 
-/**
- * Main JSON API router.
- *
- * IMPORTANT:
- * - handleLogin() lives in Auth.gs.
- * - Phase 7 handlers live in Handover.gs as V2.
- */
 function doPost(e) {
   try {
     if (!e || !e.postData || !e.postData.contents) {
@@ -41,22 +31,16 @@ function doPost(e) {
           success: true,
           message: 'API is online'
         });
-
       case 'login':
         return handleLogin(requestData);
-
       case 'getSellers':
         return handleGetSellers();
-
       case 'generateManifest':
         return handleGenerateManifest(requestData);
-
       case 'getReadyHandover':
         return handleGetReadyHandoverV2(requestData);
-
       case 'completeHandover':
         return handleCompleteHandoverV2(requestData);
-
       default:
         return createErrorResponse(
           'Action tidak dikenal: ' + action,
@@ -71,9 +55,6 @@ function doPost(e) {
   }
 }
 
-/**
- * Health check.
- */
 function doGet(e) {
   return createJsonResponse({
     success: true,
@@ -81,9 +62,6 @@ function doGet(e) {
   });
 }
 
-/**
- * Get active sellers.
- */
 function handleGetSellers() {
   const sheet = SpreadsheetApp
     .getActiveSpreadsheet()
@@ -97,6 +75,7 @@ function handleGetSellers() {
   }
 
   const data = sheet.getDataRange().getValues();
+
   if (data.length < 2) {
     return createJsonResponse({
       success: true,
@@ -115,7 +94,12 @@ function handleGetSellers() {
 
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
-    if (String(row[statusIdx] || '').trim().toUpperCase() !== 'ACTIVE') {
+
+    if (
+      String(row[statusIdx] || '')
+        .trim()
+        .toUpperCase() !== 'ACTIVE'
+    ) {
       continue;
     }
 
@@ -133,9 +117,6 @@ function handleGetSellers() {
   });
 }
 
-/**
- * Create manifest, store AWBs and generate PDF.
- */
 function handleGenerateManifest(requestData) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const manifestSheet = ss.getSheetByName('MANIFEST');
@@ -172,6 +153,7 @@ function handleGenerateManifest(requestData) {
   }
 
   let user;
+
   try {
     user = JSON.parse(cachedUser);
   } catch (error) {
@@ -183,6 +165,7 @@ function handleGenerateManifest(requestData) {
 
   const sellerData = sellerSheet.getDataRange().getValues();
   const sellerHeaders = sellerData[0];
+
   const sellerIdIdx = sellerHeaders.indexOf('seller_id');
   const sellerNameIdx = sellerHeaders.indexOf('seller_name');
   const receiverNameIdx = sellerHeaders.indexOf('receiver_name');
@@ -194,7 +177,9 @@ function handleGenerateManifest(requestData) {
   for (let i = 1; i < sellerData.length; i++) {
     if (
       String(sellerData[i][sellerIdIdx] || '') === String(sellerId || '') &&
-      String(sellerData[i][sellerStatusIdx] || '').trim().toUpperCase() === 'ACTIVE'
+      String(sellerData[i][sellerStatusIdx] || '')
+        .trim()
+        .toUpperCase() === 'ACTIVE'
     ) {
       sellerInfo = sellerData[i];
       break;
@@ -202,7 +187,9 @@ function handleGenerateManifest(requestData) {
   }
 
   if (!sellerInfo) {
-    return createErrorResponse('Seller tidak ditemukan atau tidak aktif.');
+    return createErrorResponse(
+      'Seller tidak ditemukan atau tidak aktif.'
+    );
   }
 
   const sellerName = sellerInfo[sellerNameIdx] || '';
@@ -210,6 +197,7 @@ function handleGenerateManifest(requestData) {
   const sellerPhone = sellerInfo[sellerPhoneIdx] || '-';
 
   const today = new Date();
+
   const dateString = Utilities.formatDate(
     today,
     'Asia/Jakarta',
@@ -224,7 +212,8 @@ function handleGenerateManifest(requestData) {
 
   if (manifestData.length > 1) {
     const manifestHeaders = manifestData[0];
-    const manifestNumberIdx = manifestHeaders.indexOf('manifest_number');
+    const manifestNumberIdx =
+      manifestHeaders.indexOf('manifest_number');
 
     for (let i = manifestData.length - 1; i > 0; i--) {
       const number = manifestData[i][manifestNumberIdx];
@@ -249,6 +238,7 @@ function handleGenerateManifest(requestData) {
   const nextSeq = String(maxSeq + 1).padStart(3, '0');
   const manifestNumber = prefix + nextSeq;
   const manifestId = Utilities.getUuid();
+
   const shiftName =
     shift === '1'
       ? 'Pagi'
@@ -310,6 +300,7 @@ function handleGenerateManifest(requestData) {
 
   if (awbRows.length > 0) {
     const startRow = awbSheet.getLastRow() + 1;
+
     awbSheet
       .getRange(
         startRow,
@@ -332,9 +323,6 @@ function handleGenerateManifest(requestData) {
   });
 }
 
-/**
- * Drive folder helper for generated manifest PDFs.
- */
 function getOrCreateFolder(path) {
   const parts = String(path).split('/');
   let currentFolder = DriveApp.getRootFolder();
@@ -354,8 +342,26 @@ function getOrCreateFolder(path) {
   return currentFolder;
 }
 
+function escapePdfHtml_(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /**
- * Generate manifest PDF and store it in Drive.
+ * Generate the Manifest Retur PDF using the physical form supplied
+ * by the user as the visual reference.
+ *
+ * Layout:
+ * - A4 portrait
+ * - 40 numbered rows
+ * - 5 AWB columns per row (up to 200 AWB)
+ * - Drop Point and Seller information blocks
+ * - Total returned AWB line
+ * - Footer statement and two signature blocks
  */
 function generatePdfDrive(
   manifestNumber,
@@ -366,148 +372,549 @@ function generatePdfDrive(
   awbs
 ) {
   const now = new Date();
+
   const dateStr = Utilities.formatDate(
     now,
     'Asia/Jakarta',
-    'dd MMMM yyyy'
+    'dd/MM/yyyy'
   );
 
-  let htmlBody = `
-    <html>
-      <head>
-        <style>
-          body { font-family: Arial, sans-serif; font-size: 10px; margin: 15px; color: #000; }
-          .top-header { display: flex; justify-content: space-between; font-size: 9px; margin-bottom: 5px; font-weight: bold; }
-          .title { text-align: center; font-size: 14px; font-weight: bold; margin-bottom: 10px; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
-          th, td { border: 1px solid #000; padding: 3px 5px; font-size: 9px; }
-          .bg-header { background-color: #b4c6e7; font-weight: bold; }
-          .bg-yellow { background-color: #ffd966; text-align: center; font-weight: bold; }
-          .info-table td { width: 25%; }
-          .note { font-size: 9px; margin-bottom: 8px; }
-          .footer-note { font-size: 8px; line-height: 1.3; margin-top: 15px; }
-          .sign-table { width: 100%; border: none; margin-top: 25px; }
-          .sign-table td { border: none; text-align: center; vertical-align: top; width: 50%; }
-        </style>
-      </head>
-      <body>
-        <div class="top-header">
-          <div>System-Based / GunScanner</div>
-          <div style="color:#D71920;font-size:12px;font-weight:bold;">J&T EXPRESS</div>
-        </div>
+  const safeDropPoint =
+    escapePdfHtml_(user.drop_point_id || '');
 
-        <div style="font-size:10px;margin-bottom:10px;">
-          <strong>HARI/TANGGAL:</strong> ${dateStr}
-        </div>
+  const safeSprinter =
+    escapePdfHtml_(user.nama_sprinter || '');
 
-        <div class="title">
-          FORM RETUR PENGEMBALIAN BARANG SELLER
-        </div>
+  const safeSprinterPhone =
+    escapePdfHtml_(user.no_hp || '');
 
-        <table class="info-table">
-          <tr>
-            <td class="bg-header">DATA DROPPOINT</td>
-            <td class="bg-header">DATA SELLER</td>
-          </tr>
-          <tr>
-            <td><strong>DROPPOINT:</strong> ${user.drop_point_id}</td>
-            <td><strong>NAMA SELLER DI SISTEM:</strong> ${sellerName}</td>
-          </tr>
-          <tr>
-            <td><strong>NAMA LENGKAP SPRINTER:</strong> ${user.nama_sprinter}</td>
-            <td><strong>NAMA PENERIMA:</strong> ${receiverName}</td>
-          </tr>
-          <tr>
-            <td><strong>NO HP SPRINTER:</strong> ${user.no_hp}</td>
-            <td><strong>NO HP:</strong> ${sellerPhone}</td>
-          </tr>
-        </table>
+  const safeSeller =
+    escapePdfHtml_(sellerName || '');
 
-        <div class="note">
-          Keterangan: Paket sudah diserahkan ke PIC Seller.
-        </div>
+  const safeReceiver =
+    escapePdfHtml_(receiverName || '');
 
-        <table>
-          <tr>
-            <th class="bg-yellow" style="width:4%">NO</th>
-            <th class="bg-yellow" style="width:21%">AWB</th>
-            <th class="bg-yellow" style="width:4%">NO</th>
-            <th class="bg-yellow" style="width:21%">AWB</th>
-            <th class="bg-yellow" style="width:4%">NO</th>
-            <th class="bg-yellow" style="width:21%">AWB</th>
-            <th class="bg-yellow" style="width:4%">NO</th>
-            <th class="bg-yellow" style="width:21%">AWB</th>
-          </tr>`;
+  const safeSellerPhone =
+    escapePdfHtml_(sellerPhone || '');
 
-  const colCount = 4;
-  const rowCount = Math.ceil(awbs.length / colCount);
-  const totalRows = Math.max(rowCount, 10);
+  const totalRows = 40;
+  const awbColumns = 5;
 
-  for (let i = 0; i < totalRows; i++) {
-    htmlBody += '<tr>';
+  let awbGridRows = '';
 
-    for (let c = 0; c < colCount; c++) {
-      const itemIndex = (i * colCount) + c;
-      const currentAwb = awbs[itemIndex] || '';
-      const displayNo = itemIndex < awbs.length
-        ? itemIndex + 1
-        : '';
+  for (let row = 0; row < totalRows; row++) {
+    awbGridRows += '<tr>';
 
-      htmlBody +=
-        '<td style="text-align:center;background-color:#f9f9f9;">' +
-        displayNo +
-        '</td><td>' +
-        currentAwb +
+    awbGridRows +=
+      '<td class="row-no">' +
+      (row + 1) +
+      '</td>';
+
+    for (let col = 0; col < awbColumns; col++) {
+      const index =
+        (row * awbColumns) + col;
+
+      const value =
+        index < awbs.length
+          ? escapePdfHtml_(awbs[index])
+          : '';
+
+      awbGridRows +=
+        '<td class="awb-cell">' +
+        value +
         '</td>';
     }
 
-    htmlBody += '</tr>';
+    awbGridRows += '</tr>';
   }
 
-  htmlBody += `
-        </table>
+  const totalAwb = awbs.length;
 
-        <div style="font-weight:bold;margin-bottom:10px;font-size:10px;">
-          TOTAL barang yang telah dikembalikan: ${awbs.length} AWB
+  const htmlBody = `
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+
+<style>
+  @page {
+    size: A4 portrait;
+    margin: 5mm 4.5mm 4.5mm 4.5mm;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    background: #ffffff;
+    color: #111111;
+    font-family: Arial, "Noto Sans", sans-serif;
+    font-size: 8pt;
+    line-height: 1.05;
+  }
+
+  .page {
+    width: 100%;
+  }
+
+  .top {
+    position: relative;
+    height: 17mm;
+  }
+
+  .system {
+    position: absolute;
+    top: 0;
+    left: 0;
+    font-size: 7.2pt;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .logo {
+    position: absolute;
+    top: -1mm;
+    right: 7mm;
+    color: #D71920;
+    font-size: 15pt;
+    font-weight: 900;
+    font-style: italic;
+    white-space: nowrap;
+  }
+
+  .logo small {
+    font-size: 8pt;
+    margin-left: 1mm;
+  }
+
+  .date {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    font-size: 7.8pt;
+    font-weight: 700;
+  }
+
+  .title {
+    text-align: center;
+    font-size: 10.5pt;
+    font-weight: 800;
+    margin-top: 0.5mm;
+  }
+
+  .subtitle {
+    text-align: center;
+    font-size: 8pt;
+    margin-top: 0.8mm;
+    margin-bottom: 2.2mm;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  .info-table {
+    margin-bottom: 2mm;
+  }
+
+  .info-table td {
+    border: 0.35pt solid #777777;
+    padding: 0.65mm 0.8mm;
+    height: 4.6mm;
+    vertical-align: middle;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .info-table .section {
+    background: #B4C7E7;
+    font-weight: 800;
+    font-size: 7.8pt;
+    height: 5.1mm;
+  }
+
+  .info-table .label {
+    width: 22%;
+    font-weight: 700;
+    font-size: 7.25pt;
+  }
+
+  .info-table .colon {
+    width: 2%;
+    text-align: center;
+    font-weight: 700;
+  }
+
+  .info-table .value {
+    width: 26%;
+    font-size: 7.25pt;
+  }
+
+  .note {
+    font-size: 7.7pt;
+    font-weight: 700;
+    margin: 1mm 0 0.9mm;
+  }
+
+  .awb-table {
+    width: 100%;
+    border: 0.4pt solid #888888;
+  }
+
+  .awb-table th,
+  .awb-table td {
+    border: 0.3pt solid #999999;
+    padding: 0;
+  }
+
+  .awb-table th {
+    background: #FFD966;
+    height: 5.2mm;
+    text-align: center;
+    vertical-align: middle;
+    font-size: 7.15pt;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
+  .awb-table .no-head {
+    width: 5%;
+  }
+
+  .awb-table .awb-head {
+    width: 19%;
+  }
+
+  .awb-table .row-no {
+    width: 5%;
+    height: 4.72mm;
+    text-align: center;
+    vertical-align: middle;
+    font-size: 7.15pt;
+  }
+
+  .awb-table .awb-cell {
+    width: 19%;
+    height: 4.72mm;
+    padding: 0 0.6mm;
+    vertical-align: middle;
+    font-size: 7pt;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .total {
+    height: 5.8mm;
+    border-left: 0.35pt solid #777777;
+    border-right: 0.35pt solid #777777;
+    border-bottom: 0.35pt solid #777777;
+    text-align: center;
+    padding-top: 1.1mm;
+    font-size: 7.35pt;
+    font-weight: 700;
+  }
+
+  .total-line {
+    display: inline-block;
+    min-width: 34mm;
+    height: 3mm;
+    border-bottom: 0.5pt solid #111111;
+    vertical-align: bottom;
+    margin: 0 1mm;
+  }
+
+  .footer {
+    margin-top: 3mm;
+    font-size: 7pt;
+    line-height: 1.18;
+  }
+
+  .footer .line {
+    margin-top: 0.7mm;
+  }
+
+  .thank {
+    text-align: right;
+    margin-top: -3.7mm;
+    margin-right: 2mm;
+  }
+
+  .city {
+    text-align: right;
+    margin-top: 3mm;
+    margin-right: 5mm;
+    font-size: 7.7pt;
+    font-weight: 700;
+  }
+
+  .signature {
+    margin-top: 1mm;
+  }
+
+  .signature td {
+    width: 50%;
+    border: none;
+    vertical-align: top;
+    font-size: 7.2pt;
+    padding: 0 5mm;
+  }
+
+  .signature .left {
+    text-align: left;
+  }
+
+  .signature .right {
+    text-align: right;
+  }
+
+  .sign-gap {
+    height: 12.5mm;
+  }
+
+  .sign-name {
+    font-weight: 700;
+  }
+
+  .small {
+    font-size: 6.8pt;
+  }
+</style>
+</head>
+
+<body>
+<div class="page">
+
+  <div class="top">
+    <div class="system">
+      System-Based/ GunScanner/ 按系统 / 把扫描
+    </div>
+
+    <div class="logo">
+      J&amp;T<small>EXPRESS</small>
+    </div>
+
+    <div class="date">
+      HARI/TANGGAL 星期/日期: ${dateStr}
+    </div>
+  </div>
+
+  <div class="title">
+    FORM RETUR PENGEMBALIAN BARANG SELLER
+  </div>
+
+  <div class="subtitle">
+    交接单 - 网点跟卖家
+  </div>
+
+  <table class="info-table">
+    <tr>
+      <td class="section" colspan="3">
+        DATA DROPPOINT 网点明细
+      </td>
+
+      <td class="section" colspan="3">
+        DATA SELLER 卖家明细
+      </td>
+    </tr>
+
+    <tr>
+      <td class="label">
+        DROPPOINT 网点名称
+      </td>
+
+      <td class="colon">:</td>
+
+      <td class="value">
+        ${safeDropPoint}
+      </td>
+
+      <td class="label">
+        NAMA SELLER DI SISTEM 卖家名称
+      </td>
+
+      <td class="colon">:</td>
+
+      <td class="value">
+        ${safeSeller}
+      </td>
+    </tr>
+
+    <tr>
+      <td class="label">
+        NAMA LENGKAP SPRINTER 名称
+      </td>
+
+      <td class="colon">:</td>
+
+      <td class="value">
+        ${safeSprinter}
+      </td>
+
+      <td class="label">
+        NAMA PENERIMA 名称
+      </td>
+
+      <td class="colon">:</td>
+
+      <td class="value">
+        ${safeReceiver}
+      </td>
+    </tr>
+
+    <tr>
+      <td class="label">
+        NO HP SPRINTER 电话号码
+      </td>
+
+      <td class="colon">:</td>
+
+      <td class="value">
+        ${safeSprinterPhone}
+      </td>
+
+      <td class="label">
+        NO HP 电话号码
+      </td>
+
+      <td class="colon">:</td>
+
+      <td class="value">
+        ${safeSellerPhone}
+      </td>
+    </tr>
+  </table>
+
+  <div class="note">
+    Keterangan: Paket sudah diserahkan ke PIC Seller
+  </div>
+
+  <table class="awb-table">
+    <thead>
+      <tr>
+        <th class="no-head">NO</th>
+        <th class="awb-head">AWB 面单号码</th>
+        <th class="awb-head">AWB 面单号码</th>
+        <th class="awb-head">AWB 面单号码</th>
+        <th class="awb-head">AWB 面单号码</th>
+        <th class="awb-head">AWB 面单号码</th>
+      </tr>
+    </thead>
+
+    <tbody>
+      ${awbGridRows}
+    </tbody>
+  </table>
+
+  <div class="total">
+    总共多少票已交接 TOTAL barang yang telah dikembalikan
+    <span class="total-line">${totalAwb}</span>
+    AWB (票)
+  </div>
+
+  <div class="footer">
+    <div>
+      Diatas adalah Data No AWB yang telah kami serahkan kepada PIC Seller.
+    </div>
+
+    <div class="line">
+      Form ini sebagai bukti untuk serah terima barang yang telah diretur oleh sprinter DP
+    </div>
+
+    <div class="line">
+      以上单号的货物已经交接给卖家的负责人并验收。这张表格是作为网点退回货物的证明而创建的
+    </div>
+
+    <div class="thank">
+      Terima kasih. 谢谢
+    </div>
+  </div>
+
+  <div class="city">
+    Semarang ,
+  </div>
+
+  <table class="signature">
+    <tr>
+      <td class="left">
+        网点 DP<br>
+        Yang Membuat
+
+        <div class="sign-gap"></div>
+
+        <div class="sign-name">
+          (${safeSprinter})
         </div>
 
-        <div class="footer-note">
-          Diatas adalah Data No AWB yang telah kami serahkan kepada PIC Seller.<br>
-          Form ini sebagai bukti untuk serah terima barang yang telah diretur oleh sprinter DP.<br>
-          Semarang, ....................................................
+        <div class="small">
+          (SPV DP/ADMIN/SPRINTER)
         </div>
 
-        <table class="sign-table">
-          <tr>
-            <td>
-              <strong>Yang Membuat</strong><br><br><br><br>
-              <strong>(${user.nama_sprinter})</strong><br>
-              <span style="font-size:8px;">SPV DP / ADMIN / SPRINTER</span>
-            </td>
-            <td>
-              <strong>Yang Menerima</strong><br><br><br><br>
-              <strong>( _________________________________ )</strong><br>
-              <span style="font-size:8px;">(PIC Seller) / Penanggung Jawab</span>
-            </td>
-          </tr>
-        </table>
-      </body>
-    </html>`;
+        <div class="small">
+          主管/文员/快递员
+        </div>
+      </td>
+
+      <td class="right">
+        卖家 Seller<br>
+        Yang Menerima
+
+        <div class="sign-gap"></div>
+
+        <div class="sign-name">
+          (Nama lengkap) 名字
+        </div>
+
+        <div class="small">
+          (PIC Seller) 卖家负责人
+        </div>
+      </td>
+    </tr>
+  </table>
+
+</div>
+</body>
+</html>`;
 
   const blob = Utilities
     .newBlob(htmlBody, MimeType.HTML)
     .setName(manifestNumber + '.pdf')
     .getAs(MimeType.PDF);
 
-  const year = Utilities.formatDate(now, 'Asia/Jakarta', 'yyyy');
-  const month = Utilities.formatDate(now, 'Asia/Jakarta', 'MM');
-  const day = Utilities.formatDate(now, 'Asia/Jakarta', 'dd');
+  const year = Utilities.formatDate(
+    now,
+    'Asia/Jakarta',
+    'yyyy'
+  );
+
+  const month = Utilities.formatDate(
+    now,
+    'Asia/Jakarta',
+    'MM'
+  );
+
+  const day = Utilities.formatDate(
+    now,
+    'Asia/Jakarta',
+    'dd'
+  );
 
   const targetFolder = getOrCreateFolder(
-    'MANIFEST_RETUR/PDF/' + year + '/' + month + '/' + day
+    'MANIFEST_RETUR/PDF/' +
+    year +
+    '/' +
+    month +
+    '/' +
+    day
   );
 
   const file = targetFolder.createFile(blob);
+
   file.setSharing(
     DriveApp.Access.ANYONE_WITH_LINK,
     DriveApp.Permission.VIEW
@@ -519,17 +926,16 @@ function generatePdfDrive(
   };
 }
 
-/**
- * Standard JSON response helper used by all Apps Script files.
- */
 function createJsonResponse(responseObj) {
   const finalResponse = {
     success: responseObj.success !== undefined
       ? responseObj.success
       : true,
+
     data: responseObj.data !== undefined
       ? responseObj.data
       : null,
+
     message: responseObj.message || ''
   };
 
@@ -538,11 +944,6 @@ function createJsonResponse(responseObj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-/**
- * Standard error response helper.
- * HTTP status cannot be directly controlled by ContentService;
- * the optional code is retained for caller semantics.
- */
 function createErrorResponse(message, code) {
   return ContentService
     .createTextOutput(JSON.stringify({
