@@ -35,10 +35,8 @@ jobs:
       - name: Validate deployment secrets
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
-          CLASP_DEPLOYMENT_ID: ${{ secrets.CLASP_DEPLOYMENT_ID }}
         run: |
           test -n "$CLASPRC_JSON" || { echo 'Missing GitHub secret: CLASPRC_JSON'; exit 1; }
-          test -n "$CLASP_DEPLOYMENT_ID" || { echo 'Missing GitHub secret: CLASP_DEPLOYMENT_ID'; exit 1; }
 
       - name: Configure clasp authentication
         env:
@@ -95,8 +93,19 @@ jobs:
           clasp status
           clasp push --force --debug
 
-      - name: Update existing production deployment
+      - name: Publish production deployment
         env:
-          CLASP_DEPLOYMENT_ID: ${{ secrets.CLASP_DEPLOYMENT_ID }}
+          SCRIPT_ID: ${{ secrets.APPS_SCRIPT_ID }}
         run: |
-          clasp update-deployment "$CLASP_DEPLOYMENT_ID" --description "GitHub Actions ${GITHUB_SHA::7}"
+          test -n "$SCRIPT_ID" || { echo 'Missing GitHub secret: APPS_SCRIPT_ID'; exit 1; }
+          curl --fail-with-body -sS             -X POST             -H "Authorization: Bearer $(python3 - <<'PY'
+          import json, pathlib
+          d=json.loads((pathlib.Path.home()/'.clasprc.json').read_text())
+          print(d['tokens']['default']['access_token'])
+          PY
+          )"             -H "Content-Type: application/json"             "https://script.googleapis.com/v1/projects/$SCRIPT_ID/versions"             -d '{"description":"GitHub Actions '"$GITHUB_SHA"'"}'
+
+      - name: Deployment reminder
+        if: failure()
+        run: |
+          echo "If source push succeeded but publishing failed, verify Apps Script API access and the APPS_SCRIPT_ID secret."
