@@ -1,0 +1,1 @@
+Temporary trigger for manifest PDF patch workflow. This file can be removed after the workflow applies the requested changes.
