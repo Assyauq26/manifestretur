@@ -31,6 +31,18 @@ The `/handover` page uses these backend actions:
 
 Backend validates the session token and manifest scope, requires `READY_HANDOVER`, stores photo/signature evidence in Google Drive, then changes the manifest status to `COMPLETED`.
 
+## Handover V2 frontend
+
+`src/HandoverPage.jsx` adds:
+
+- custom success modal after successful handover;
+- manifest PDF link when returned by the backend/manifest data;
+- handover photo preview;
+- native device sharing of photo + caption/link to WhatsApp when supported;
+- WhatsApp text fallback when file sharing is unavailable;
+- pointer-based signature capture with device-pixel-ratio scaling for better finger alignment;
+- removal of completed manifests from the READY_HANDOVER list without redirecting to Home.
+
 ## Google Apps Script integration
 
 `apps-script/Phase7_Handover.gs` is an additive module. It is intended to be added to the existing GAS project without replacing the existing login, seller, manifest, or PDF functions.
