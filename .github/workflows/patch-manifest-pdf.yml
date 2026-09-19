@@ -9,7 +9,6 @@ permissions:
 
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,7 +16,6 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
 
           app = Path('src/App.jsx')
           s = app.read_text()
@@ -34,6 +32,7 @@ jobs:
 
           kode = Path('apps-script/Kode.gs')
           k = kode.read_text()
+          if 'const totalRows = 40;' not in k: raise SystemExit('totalRows=40 not found')
           k = k.replace('const totalRows = 40;', 'const totalRows = 35;', 1)
           old_css = '''  .logo {
     position: absolute;
@@ -60,7 +59,7 @@ jobs:
     display: block;
   }
 '''
-          if old_css not in k: raise SystemExit('Kode.gs logo CSS not found')
+          if old_css not in k: raise SystemExit('logo CSS not found')
           k = k.replace(old_css, new_css, 1)
           old_html = '''    <div class="logo">
       J&amp;T<small>EXPRESS</small>
@@ -68,7 +67,7 @@ jobs:
 '''
           new_html = '''    <img class="logo-image" src="${getJTLogoDataUri_()}" alt="J&T Express" />
 '''
-          if old_html not in k: raise SystemExit('Kode.gs logo HTML not found')
+          if old_html not in k: raise SystemExit('logo HTML not found')
           k = k.replace(old_html, new_html, 1)
           helper = '''function getJTLogoDataUri_() {
   const logoUrl = 'https://commons.wikimedia.org/w/index.php?title=Special:Redirect/file/J%26T_Express_logo.svg';
@@ -93,7 +92,7 @@ jobs:
       downloadUrl: 'https://drive.google.com/uc?export=download&id=' + pdfResult.id,
       status: 'READY_HANDOVER'
 """
-          if old_ret not in k: raise SystemExit('Kode.gs response block not found')
+          if old_ret not in k: raise SystemExit('response block not found')
           k = k.replace(old_ret, new_ret, 1)
           kode.write_text(k)
           PY
@@ -109,6 +108,6 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/App.jsx apps-script/Kode.gs
-          git rm .github/workflows/patch-manifest-pdf.yml
+          git rm .github/workflows/patch-manifest-pdf.yml PATCH_TRIGGER.md
           git commit -m 'feat: update manifest PDF template and generate flow'
           git push
