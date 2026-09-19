@@ -32,13 +32,11 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Validate deployment secrets
+      - name: Validate authentication secret
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
-          CLASP_DEPLOYMENT_ID: ${{ secrets.CLASP_DEPLOYMENT_ID }}
         run: |
           test -n "$CLASPRC_JSON" || { echo 'Missing GitHub secret: CLASPRC_JSON'; exit 1; }
-          test -n "$CLASP_DEPLOYMENT_ID" || { echo 'Missing GitHub secret: CLASP_DEPLOYMENT_ID'; exit 1; }
 
       - name: Configure clasp authentication
         env:
@@ -94,13 +92,16 @@ jobs:
           clasp status
           clasp push --force --debug
 
-      - name: Update existing production deployment
-        env:
-          CLASP_DEPLOYMENT_ID: ${{ secrets.CLASP_DEPLOYMENT_ID }}
+      - name: Discover and publish production deployment
         run: |
-          test -n "$CLASP_DEPLOYMENT_ID" || { echo 'Missing GitHub secret: CLASP_DEPLOYMENT_ID'; exit 1; }
-          case "$CLASP_DEPLOYMENT_ID" in
-            AKfycb*) ;;
-            *) echo "Invalid CLASP_DEPLOYMENT_ID format"; exit 1 ;;
-          esac
-          clasp update-deployment "$CLASP_DEPLOYMENT_ID" --description "GitHub Actions ${GITHUB_SHA::7}"
+          set -euo pipefail
+          deployments="$(clasp list-deployments 2>&1 || true)"
+          echo "$deployments"
+          deployment_id="$(printf '%s\n' "$deployments" | grep -oE 'AKfycb[A-Za-z0-9_-]+' | head -n 1 || true)"
+          if [ -n "$deployment_id" ]; then
+            echo "Updating existing deployment."
+            clasp update-deployment "$deployment_id" --description "GitHub Actions ${GITHUB_SHA::7}"
+          else
+            echo "No existing deployment detected; creating production deployment."
+            clasp deploy --description "Production ${GITHUB_SHA::7}"
+          fi
