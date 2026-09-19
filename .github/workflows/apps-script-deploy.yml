@@ -47,10 +47,7 @@ jobs:
           python3 - <<'PY'
           import json, os, pathlib
           raw = os.environ["CLASPRC_JSON"].strip()
-          try:
-              data = json.loads(raw)
-          except json.JSONDecodeError as e:
-              raise SystemExit(f"CLASPRC_JSON is invalid JSON: {e}")
+          data = json.loads(raw)
           pathlib.Path.home().joinpath(".clasprc.json").write_text(
               json.dumps(data, separators=(",", ":"), ensure_ascii=False),
               encoding="utf-8",
@@ -81,7 +78,6 @@ jobs:
 
       - name: Check Apps Script files
         run: |
-          printf '%s\n' 'Apps Script source files:'
           find apps-script -maxdepth 1 -type f -printf '%f\n' | sort
 
       - name: Validate clasp credentials
@@ -89,8 +85,7 @@ jobs:
           python3 - <<'PY'
           import json, pathlib
           data = json.loads((pathlib.Path.home() / ".clasprc.json").read_text(encoding="utf-8"))
-          tokens = data.get("tokens", {})
-          if "default" not in tokens:
+          if "default" not in data.get("tokens", {}):
               raise SystemExit("CLASPRC_JSON does not contain tokens.default")
           print("CLASPRC_JSON parsed successfully")
           PY
