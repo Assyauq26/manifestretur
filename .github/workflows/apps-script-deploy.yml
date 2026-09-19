@@ -67,6 +67,34 @@ jobs:
           test -f .clasp.json
           test -f apps-script/appsscript.json
 
+          node <<'NODE'
+          const fs = require('fs');
+
+          const clasp = JSON.parse(fs.readFileSync('.clasp.json', 'utf8'));
+          const manifest = JSON.parse(
+            fs.readFileSync('apps-script/appsscript.json', 'utf8')
+          );
+
+          if (!clasp.scriptId) {
+            throw new Error('.clasp.json is missing scriptId');
+          }
+
+          if (clasp.rootDir !== 'apps-script') {
+            throw new Error('.clasp.json rootDir must be "apps-script"');
+          }
+
+          if (!manifest.runtimeVersion) {
+            console.warn('Warning: appsscript.json has no runtimeVersion');
+          }
+
+          console.log('clasp configuration and manifest are valid');
+          NODE
+
+      - name: Check Apps Script files
+        run: |
+          printf '%s\n' 'Apps Script source files:'
+          find apps-script -maxdepth 1 -type f -printf '%f\n' | sort
+
       - name: Validate clasp credentials
         run: |
           python3 - <<'PY'
@@ -80,7 +108,9 @@ jobs:
           PY
 
       - name: Push source to Apps Script
-        run: clasp push --force
+        run: |
+          clasp status
+          clasp push --force
 
       - name: Update existing production deployment
         env:
