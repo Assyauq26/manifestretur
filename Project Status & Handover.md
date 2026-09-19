@@ -16,7 +16,7 @@ Key Operational Goals:
 
 ## 2. Tech Stack & Architecture
 
-* **Frontend:** Single-file React (`App.jsx`/`App.tsx`) utilizing `HashRouter` for stable iframe/Canvas compatibility, Tailwind CSS for styling (J&T Red `#D71920`), and Lucide React icons. Libraries include `html5-qrcode` for continuous camera barcode scanning.
+* **Frontend:** Single-file React (`App.jsx`) utilizing `HashRouter`, Tailwind CSS, J&T Red `#D71920`, Lucide React, and `html5-qrcode`.
 * **Backend:** Google Apps Script (GAS) acting as a serverless REST API (`doPost` / `doOptions`) connected to Google Sheets.
 * **Database (Google Sheets):**
   * `SPRINTER_MASTER`: Employee/sprinter credentials and drop point assignments.
@@ -33,29 +33,52 @@ Key Operational Goals:
 * **Phase 3: Manifest Creation Form**
   * `/manifest/create` view allowing sprinters to select operational shifts (Pagi/Siang/Sore) and fetch active sellers dynamically from `SELLER_MASTER`. Read-only auto-fill for Sprinter name and Drop Point ID.
 * **Phase 4: Manual AWB Input**
-  * Instant text input validation, duplicate prevention toast alerts, real-time item counter, and item deletion logic.
+  * Instant text input validation, duplicate prevention, real-time item counter, and item deletion logic.
 * **Phase 5: Continuous Camera Barcode Scanner**
-  * Integrated `html5-qrcode` engine allowing continuous scanning of barcode resis without closing the camera view, featuring audio/visual feedback (`playBeep`).
+  * Integrated `html5-qrcode` for continuous barcode scanning with audio/visual feedback.
 * **Phase 6: PDF Generation & Google Drive Storage**
-  * Automated backend PDF builder rendering a 4-column AWB grid matching the official J&T template (completely purged of Mandarin text, localized in Indonesian).
-  * Automated hierarchical folder management in Google Drive (`MANIFEST_RETUR/PDF/YYYY/MM/DD/`).
-  * Custom interactive success modal in the UI providing direct access to open the generated PDF or return to the dashboard.
-  * Fixed mobile browser redirect and popup blocking issues.
+  * Automated backend PDF builder and Drive storage under `MANIFEST_RETUR/PDF/YYYY/MM/DD/`.
+  * Interactive success modal with direct PDF access.
+  * Mobile browser redirect/popup handling fixed.
 
-## 4. Pending / Remaining Phases
+## 4. Current Phase: Phase 7 — Hand Over & Evidence Capture
 
-* **Phase 7: Hand Over (Penyerahan & Foto Bukti)**
-  * *Status:* Not started.
-  * *Requirements:* Build the `/handover` view where sprinters view manifests awaiting handover, capture photographic evidence (camera upload), capture digital signatures from the PIC Seller, and update the manifest status in Google Sheets from `READY_HANDOVER` to `COMPLETED`.
+**Status: Frontend implemented; backend module prepared; GAS deployment/integration pending.**
+
+Implemented in the frontend:
+* `/handover` route.
+* List of manifests with `READY_HANDOVER` status.
+* Photo evidence capture using the device camera.
+* Digital signature capture using a touch-friendly canvas.
+* Submission flow using the authenticated session token.
+* UI removes a completed manifest from the pending list.
+
+Prepared in `apps-script/Phase7_Handover.gs`:
+* `phase7_getReadyHandover_()`.
+* `phase7_completeHandover_()`.
+* Session validation through `CacheService`.
+* Manifest scope validation by sprinter/drop point.
+* Atomic status transition from `READY_HANDOVER` to `COMPLETED` using a script lock.
+* Photo/signature upload to Google Drive.
+* Automatic optional handover columns in `MANIFEST`.
+
+Required GAS router actions:
+* `getReadyHandover`.
+* `completeHandover`.
+
+## 5. Pending / Remaining Phases
+
+* **Phase 7 completion:** Add the Phase 7 module to the existing GAS project, connect the two router actions, deploy the GAS web app, and test the full handover flow from a real manifest.
 * **Phase 8: Retur Dashboard / Search App**
-  * *Status:* Not started.
-  * *Requirements:* Admin search and filter views for historical manifests and AWB tracking.
+  * Admin search/filter for historical manifests and AWB tracking.
 * **Phase 9: Polish & Hardening**
-  * *Status:* Pending final UI/UX review, error boundary hardening, and production audit logs.
+  * Final UI/UX review, error boundary hardening, payload/image-size handling, and production audit logs.
 
-## 5. Instructions for the Next GPT Agent
+## 6. Next Implementation Order
 
-When taking over this project, note that:
-1. The frontend operates inside a **Single-File React structure** (`App.jsx` using `HashRouter`).
-2. The backend is an active Google Apps Script web app endpoint (`API_URL` is configured in the code).
-3. The next immediate implementation task is **Phase 7 (Hand Over & Evidence Capture)**, which involves building the UI route `/handover`, capturing images/signatures, and updating the manifest status via a new backend API action.
+1. Integrate `apps-script/Phase7_Handover.gs` into the existing GAS backend.
+2. Deploy the updated GAS Web App using the existing endpoint or a new version.
+3. Test `getReadyHandover` with an authenticated sprinter.
+4. Test photo + signature submission for one `READY_HANDOVER` manifest.
+5. Verify Drive evidence files and `MANIFEST` status/URLs.
+6. Then implement Phase 8 search/dashboard.
