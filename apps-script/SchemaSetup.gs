@@ -2,12 +2,14 @@
  * PHASE 1: Database Schema Setup
  * Script ini digunakan untuk menginisialisasi Google Sheets sebagai database.
  * Jalankan fungsi 'setupDatabaseSchema' sekali saat pertama kali menyiapkan project.
+ *
+ * IMPORTANT:
+ * - setupDatabaseSchema() membuat sheet/header baru.
+ * - migrateDatabaseSchema() aman dijalankan pada spreadsheet yang sudah berisi data.
  */
 
-function setupDatabaseSchema() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  const sheetsConfig = [
+function getDatabaseSchemaConfig_() {
+  return [
     {
       name: 'SPRINTER_MASTER',
       headers: [
@@ -66,8 +68,13 @@ function setupDatabaseSchema() {
       ]
     }
   ];
+}
 
-  sheetsConfig.forEach(config => {
+function setupDatabaseSchema() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetsConfig = getDatabaseSchemaConfig_();
+
+  sheetsConfig.forEach(function(config) {
     let sheet = ss.getSheetByName(config.name);
     if (!sheet) sheet = ss.insertSheet(config.name);
 
@@ -80,10 +87,68 @@ function setupDatabaseSchema() {
     }
   });
 
+  migrateDatabaseSchema();
+
   const sheet1 = ss.getSheetByName('Sheet1');
   if (sheet1 && ss.getSheets().length > 1) ss.deleteSheet(sheet1);
 
   Logger.log('Database schema setup complete.');
+}
+
+/**
+ * Migration aman untuk spreadsheet yang SUDAH memiliki data.
+ * Menambahkan kolom schema yang belum ada tanpa menghapus/mengubah data lama.
+ */
+function migrateDatabaseSchema() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheetsConfig = getDatabaseSchemaConfig_();
+  const changes = [];
+
+  sheetsConfig.forEach(function(config) {
+    let sheet = ss.getSheetByName(config.name);
+    if (!sheet) {
+      sheet = ss.insertSheet(config.name);
+      sheet.getRange(1, 1, 1, config.headers.length).setValues([config.headers]);
+      sheet.getRange(1, 1, 1, config.headers.length)
+        .setFontWeight('bold')
+        .setBackground('#f3f4f6');
+      sheet.setFrozenRows(1);
+      changes.push(config.name + ': created');
+      return;
+    }
+
+    if (sheet.getLastRow() === 0) {
+      sheet.getRange(1, 1, 1, config.headers.length).setValues([config.headers]);
+      sheet.getRange(1, 1, 1, config.headers.length)
+        .setFontWeight('bold')
+        .setBackground('#f3f4f6');
+      sheet.setFrozenRows(1);
+      changes.push(config.name + ': initialized');
+      return;
+    }
+
+    const existingHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+      .map(function(h) { return String(h || '').trim(); });
+    const existingSet = {};
+    existingHeaders.forEach(function(h) { existingSet[h.toLowerCase()] = true; });
+
+    config.headers.forEach(function(header) {
+      if (!existingSet[header.toLowerCase()]) {
+        const newColumn = sheet.getLastColumn() + 1;
+        sheet.getRange(1, newColumn).setValue(header);
+        sheet.getRange(1, newColumn)
+          .setFontWeight('bold')
+          .setBackground('#f3f4f6');
+        existingSet[header.toLowerCase()] = true;
+        changes.push(config.name + ': added ' + header);
+      }
+    });
+
+    sheet.setFrozenRows(1);
+  });
+
+  Logger.log('Database schema migration complete: ' + (changes.length ? changes.join(' | ') : 'no changes needed'));
+  return changes;
 }
 
 function seedDummyData() {
