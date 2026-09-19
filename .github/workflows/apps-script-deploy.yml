@@ -90,25 +90,48 @@ jobs:
           clasp status
           clasp push --force
 
+      - name: Create Apps Script version
+        id: version
+        run: |
+          set -euo pipefail
+          DESCRIPTION="Production ${GITHUB_SHA::7}"
+          echo "Creating Apps Script version..."
+          VERSION_OUTPUT="$(clasp version "$DESCRIPTION" 2>&1)"
+          echo "$VERSION_OUTPUT"
+          VERSION_NUMBER="$(printf '%s\n' "$VERSION_OUTPUT" | grep -oE 'Version [0-9]+' | tail -n 1 | awk '{print $2}' || true)"
+          if [ -z "$VERSION_NUMBER" ]; then
+            VERSION_NUMBER="$(clasp versions | tail -n 1 | awk 'NF {print $1}' || true)"
+          fi
+          if [ -z "$VERSION_NUMBER" ]; then
+            echo "Unable to determine the Apps Script version number."
+            exit 1
+          fi
+          echo "version_number=$VERSION_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "Using version: $VERSION_NUMBER"
+
       - name: Check existing deployments
         run: |
           set -euo pipefail
           if ! deployments="$(clasp list-deployments 2>&1)"; then
-            echo 'Unable to list Apps Script deployments.'
+            echo "Unable to list Apps Script deployments."
             echo "$deployments"
             exit 1
           fi
           echo "$deployments"
 
       - name: Publish production deployment
+        env:
+          VERSION_NUMBER: ${{ steps.version.outputs.version_number }}
         run: |
           set -euo pipefail
           deployments="$(clasp list-deployments 2>&1)"
+          echo "$deployments"
           deployment_id="$(printf '%s\n' "$deployments" | grep -oE 'AKfycb[A-Za-z0-9_-]+' | head -n 1 || true)"
+
           if [ -n "$deployment_id" ]; then
-            echo "Updating existing production deployment."
-            clasp update-deployment "$deployment_id" --description "GitHub Actions ${GITHUB_SHA::7}"
+            echo "Updating existing production deployment to version $VERSION_NUMBER."
+            clasp update-deployment "$deployment_id" --versionNumber "$VERSION_NUMBER"
           else
             echo "No existing deployment found; creating a new production deployment."
-            clasp deploy --description "Production ${GITHUB_SHA::7}"
+            clasp deploy --versionNumber "$VERSION_NUMBER" --description "Production ${GITHUB_SHA::7}"
           fi
