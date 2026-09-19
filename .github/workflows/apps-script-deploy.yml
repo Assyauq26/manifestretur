@@ -1,0 +1,66 @@
+name: Deploy Google Apps Script
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps-script/**'
+      - '.clasp.json'
+      - '.github/workflows/apps-script-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apps-script-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Sync & deploy Apps Script
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate deployment secrets
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          CLASP_DEPLOYMENT_ID: ${{ secrets.CLASP_DEPLOYMENT_ID }}
+        run: |
+          test -n "$CLASPRC_JSON" || { echo 'Missing GitHub secret: CLASPRC_JSON'; exit 1; }
+          test -n "$CLASP_DEPLOYMENT_ID" || { echo 'Missing GitHub secret: CLASP_DEPLOYMENT_ID'; exit 1; }
+
+      - name: Configure clasp authentication
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+        run: |
+          printf '%s' "$CLASPRC_JSON" > "$HOME/.clasprc.json"
+          chmod 600 "$HOME/.clasprc.json"
+
+      - name: Install clasp
+        run: npm install --global @google/clasp@3.4.0
+
+      - name: Verify Apps Script project
+        run: |
+          clasp --version
+          test -f .clasp.json
+          test -f apps-script/appsscript.json
+
+      - name: Push source to Apps Script
+        run: clasp push --force
+
+      - name: Update existing production deployment
+        env:
+          CLASP_DEPLOYMENT_ID: ${{ secrets.CLASP_DEPLOYMENT_ID }}
+        run: |
+          clasp update-deployment "$CLASP_DEPLOYMENT_ID" --description "GitHub Actions ${GITHUB_SHA::7}"
