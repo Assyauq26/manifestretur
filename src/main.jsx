@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App.jsx';
 import HandoverPageV2 from './HandoverPage.jsx';
+import './scanner-enhancement.js';
 import './index.css';
 
 const isHandoverRoute = () => window.location.hash === '#/handover' || window.location.hash.startsWith('#/handover?');
