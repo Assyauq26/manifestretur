@@ -16,11 +16,14 @@ const getTotalAwb = (manifest) => manifest?.totalAwb || manifest?.total_awb || m
 const getShift = (manifest) => manifest?.shiftLabel || manifest?.shift_name || manifest?.shift || '-';
 
 function goTo(path) {
-  const hash = path === '/' ? '#/' : `#${path}`;
-  if (window.location.hash !== hash) {
-    window.location.hash = hash;
+  const target = `${window.location.pathname}${path === '/' ? '#/' : `#${path}`}`;
+  // Use a real browser navigation here because HandoverPageV3 is intentionally
+  // mounted outside the legacy HashRouter. This avoids the stale-overlay / dead
+  // navigation state observed after completing a handover.
+  if (window.location.href !== new URL(target, window.location.href).href) {
+    window.location.assign(target);
   } else {
-    window.dispatchEvent(new Event('manifestretur:navigation'));
+    window.location.reload();
   }
 }
 
@@ -29,9 +32,17 @@ function BottomNavigation() {
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around items-center h-16 z-50 max-w-md mx-auto shadow-[0_-5px_10px_rgba(0,0,0,0.03)]">
       {navItems.map(({ path, icon: Icon, label }) => {
-        const active = path === '/handover' ? currentHash.startsWith('#/handover') : currentHash === `#${path}` || (path === '/' && (currentHash === '#' || currentHash === '#/'));
+        const active = path === '/handover'
+          ? currentHash.startsWith('#/handover')
+          : currentHash === `#${path}` || (path === '/' && (currentHash === '#' || currentHash === '#/'));
         return (
-          <button key={path} type="button" onClick={() => goTo(path)} className={`flex flex-col items-center justify-center w-full h-full gap-1 transition-colors ${active ? 'text-[#D71920]' : 'text-gray-400 active:text-gray-600'}`} aria-label={label}>
+          <button
+            key={path}
+            type="button"
+            onClick={() => goTo(path)}
+            className={`flex flex-col items-center justify-center w-full h-full gap-1 transition-colors ${active ? 'text-[#D71920]' : 'text-gray-400 active:text-gray-600'}`}
+            aria-label={label}
+          >
             <Icon size={23} strokeWidth={active ? 2.5 : 2} />
             <span className={`text-[10px] font-semibold ${active ? 'text-[#D71920]' : 'text-gray-500'}`}>{label}</span>
           </button>
@@ -84,7 +95,10 @@ export default function HandoverPageV3() {
     setErrorMessage('');
     try {
       const token = localStorage.getItem('retur_token');
-      const response = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'getReadyHandover', userToken: token }) });
+      const response = await fetch(API_URL, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'getReadyHandover', userToken: token })
+      });
       const result = await response.json();
       if (!result.success) throw new Error(result.message || 'Gagal mengambil manifest handover.');
       setManifests(Array.isArray(result.data) ? result.data : []);
@@ -155,10 +169,8 @@ export default function HandoverPageV3() {
           userToken: token,
           manifestNumber,
           photoBase64: photoPreview,
-          signatureBase64: '',
           handoverMode: 'PHOTO_ONLY',
           appendPhotoToPdf: true,
-          savePhotoToDrive: false,
           handoverBy: savedUser?.nama_sprinter || ''
         })
       });
@@ -191,14 +203,32 @@ export default function HandoverPageV3() {
 
   const shareToWhatsApp = async () => {
     if (!successData) return;
-    const caption = ['SERAH TERIMA MANIFEST RETUR', '', `Manifest: ${successData.manifestNumber}`, `Seller: ${successData.sellerName}`, `Jumlah AWB: ${successData.totalAwb}`, '', 'Manifest PDF:', successData.pdfUrl || '-'].join('\n');
+    const caption = [
+      'SERAH TERIMA MANIFEST RETUR',
+      '',
+      `Manifest: ${successData.manifestNumber}`,
+      `Seller: ${successData.sellerName}`,
+      `Jumlah AWB: ${successData.totalAwb}`,
+      '',
+      'Manifest PDF:',
+      successData.pdfUrl || '-'
+    ].join('\n');
+
     try {
       if (successData.photoBase64) {
         const response = await fetch(successData.photoBase64);
         const blob = await response.blob();
-        const photoFile = new File([blob], `${successData.manifestNumber}-bukti-serah-terima.jpg`, { type: 'image/jpeg' });
+        const photoFile = new File(
+          [blob],
+          `${successData.manifestNumber}-bukti-serah-terima.jpg`,
+          { type: 'image/jpeg' }
+        );
         if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [photoFile] }))) {
-          await navigator.share({ title: `Serah Terima ${successData.manifestNumber}`, text: caption, files: [photoFile] });
+          await navigator.share({
+            title: `Serah Terima ${successData.manifestNumber}`,
+            text: caption,
+            files: [photoFile]
+          });
           return;
         }
       }
@@ -206,6 +236,7 @@ export default function HandoverPageV3() {
       if (error?.name === 'AbortError') return;
       console.error('Native share error:', error);
     }
+
     window.location.href = `https://wa.me/?text=${encodeURIComponent(caption)}`;
   };
 
@@ -307,7 +338,7 @@ export default function HandoverPageV3() {
                   )}
                   <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={handlePhoto} className="hidden" />
                 </div>
-                <p className="text-[11px] text-gray-400 mt-2">Foto akan dimasukkan ke halaman terakhir PDF Manifest. Tidak ada TTD jari.</p>
+                <p className="text-[11px] text-gray-400 mt-2">Foto akan dimasukkan ke halaman terakhir PDF Manifest. Tidak ada TTD dan foto tidak disimpan sebagai file terpisah.</p>
               </div>
 
               <button type="submit" disabled={isSubmitting || isPhotoProcessing || !photoPreview} className="w-full py-4 rounded-2xl bg-[#D71920] text-white font-bold disabled:opacity-50 flex items-center justify-center">
