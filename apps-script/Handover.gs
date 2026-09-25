@@ -1,17 +1,11 @@
 /**
  * PHASE 7: HANDOVER
- * Canonical implementation based on SchemaSetup.gs + Auth.gs.
- * Uses HANDOVER as the evidence/transaction table.
- *
- * Router integration in Kode.gs:
- *   case 'getReadyHandover': return handleGetReadyHandoverV2(requestData);
- *   case 'completeHandover': return handleCompleteHandoverV2(requestData);
+ * Photo-only handover. Signature/TTD is intentionally not used.
+ * The handover photo is embedded into a newly generated final manifest PDF.
  */
 
 const HANDOVER_READY_STATUS = 'READY_HANDOVER';
 const HANDOVER_COMPLETED_STATUS = 'COMPLETED';
-const HANDOVER_ROOT_FOLDER = 'MANIFEST_RETUR';
-const HANDOVER_FOLDER = 'HANDOVER';
 
 function handleGetReadyHandoverV2(requestData) {
   try {
@@ -62,12 +56,13 @@ function handleCompleteHandoverV2(requestData) {
   try {
     const user = getSessionUserForHandover_(requestData && requestData.userToken);
     const manifestNumber = String(requestData && requestData.manifestNumber || '').trim();
+    const photoBase64 = String(requestData && requestData.photoBase64 || '').trim();
     if (!manifestNumber) return createErrorResponse('Nomor manifest wajib diisi.');
-    if (!requestData.photoBase64) return createErrorResponse('Foto bukti serah terima wajib diisi.');
-    if (!requestData.signatureBase64) return createErrorResponse('Tanda tangan PIC Seller wajib diisi.');
+    if (!photoBase64) return createErrorResponse('Foto bukti serah terima wajib diambil.');
+    validateHandoverPhoto_(photoBase64);
 
     lock = LockService.getScriptLock();
-    lock.waitLock(15000);
+    lock.waitLock(20000);
 
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const manifestSheet = getRequiredSheetForHandover_('MANIFEST');
@@ -105,16 +100,32 @@ function handleCompleteHandoverV2(requestData) {
     const manifestId = String(manifestRow[idx.manifest_id] || '');
     const sellerId = String(manifestRow[idx.seller_id] || '');
     const sellerName = String(manifestRow[idx.seller_name] || '');
-    const pdfUrl = String(manifestRow[idx.pdf_url] || '');
-    const folder = getHandoverEvidenceFolderV2_(now, manifestNumber);
-    const photoFile = saveHandoverEvidenceV2_(requestData.photoBase64, folder, manifestNumber + '_bukti');
-    const signatureFile = saveHandoverEvidenceV2_(requestData.signatureBase64, folder, manifestNumber + '_signature');
+    const receiverName = String(manifestRow[idx.receiver_name] || '');
+    const receiverPhone = String(manifestRow[idx.receiver_phone] || '');
+    const oldPdfId = String(manifestRow[idx.pdf_file_id] || '');
+    const handoverBy = String(requestData.handoverBy || user.nama_sprinter || user.sprinter_id || '');
+
+    const awbs = getManifestAwbsForHandover_(manifestId);
+    if (!awbs.length) return createErrorResponse('AWB manifest tidak ditemukan.');
+
+    const finalPdf = generatePdfDrive(
+      manifestNumber,
+      user,
+      sellerName,
+      receiverName,
+      receiverPhone,
+      awbs,
+      {
+        handoverPhotoBase64: photoBase64,
+        handoverAt: now,
+        handoverBy: handoverBy,
+        receiverName: receiverName
+      }
+    );
 
     const handoverHeaders = handoverSheet.getDataRange().getValues()[0].map(String);
     const hidx = headerIndexForHandoverTable_(handoverHeaders);
     const handoverId = Utilities.getUuid();
-    const handoverBy = String(requestData.handoverBy || user.nama_sprinter || user.sprinter_id || '');
-
     const handoverRow = new Array(handoverHeaders.length).fill('');
     handoverRow[hidx.handover_id] = handoverId;
     handoverRow[hidx.manifest_id] = manifestId;
@@ -122,17 +133,23 @@ function handleCompleteHandoverV2(requestData) {
     handoverRow[hidx.seller_name] = sellerName;
     handoverRow[hidx.handover_at] = now;
     handoverRow[hidx.handover_by] = handoverBy;
-    handoverRow[hidx.photo_file_id] = photoFile.getId();
-    handoverRow[hidx.photo_url] = photoFile.getUrl();
-    handoverRow[hidx.signature_file_id] = signatureFile.getId();
-    handoverRow[hidx.signature_url] = signatureFile.getUrl();
-    handoverRow[hidx.notes] = String(requestData.notes || '');
+    if (hidx.photo_file_id !== undefined) handoverRow[hidx.photo_file_id] = '';
+    if (hidx.photo_url !== undefined) handoverRow[hidx.photo_url] = '';
+    if (hidx.notes !== undefined) handoverRow[hidx.notes] = String(requestData.notes || '');
     handoverRow[hidx.status] = HANDOVER_COMPLETED_STATUS;
     handoverSheet.appendRow(handoverRow);
 
     manifestSheet.getRange(rowNumber, idx.status + 1).setValue(HANDOVER_COMPLETED_STATUS);
     manifestSheet.getRange(rowNumber, idx.handover_at + 1).setValue(now);
     manifestSheet.getRange(rowNumber, idx.completed_at + 1).setValue(now);
+    manifestSheet.getRange(rowNumber, idx.pdf_file_id + 1).setValue(finalPdf.id);
+    manifestSheet.getRange(rowNumber, idx.pdf_url + 1).setValue(finalPdf.url);
+    if (idx.updated_at !== undefined) manifestSheet.getRange(rowNumber, idx.updated_at + 1).setValue(now);
+    if (idx.updated_by !== undefined) manifestSheet.getRange(rowNumber, idx.updated_by + 1).setValue(handoverBy);
+
+    if (oldPdfId && oldPdfId !== finalPdf.id) {
+      try { DriveApp.getFileById(oldPdfId).setTrashed(true); } catch (_) {}
+    }
 
     writeHandoverAuditLog_(user, manifestId, manifestNumber, handoverId, now);
 
@@ -145,9 +162,9 @@ function handleCompleteHandoverV2(requestData) {
         handoverId: handoverId,
         status: HANDOVER_COMPLETED_STATUS,
         handoverAt: now.toISOString(),
-        photoUrl: photoFile.getUrl(),
-        signatureUrl: signatureFile.getUrl(),
-        pdfUrl: pdfUrl
+        pdfUrl: finalPdf.url,
+        pdfFileId: finalPdf.id,
+        photoUrl: ''
       }
     });
   } catch (error) {
@@ -155,6 +172,34 @@ function handleCompleteHandoverV2(requestData) {
   } finally {
     if (lock) lock.releaseLock();
   }
+}
+
+function getManifestAwbsForHandover_(manifestId) {
+  const sheet = getRequiredSheetForHandover_('MANIFEST_AWB');
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 2) return [];
+  const headers = values[0].map(String);
+  const map = {};
+  headers.forEach(function(h, i) { map[String(h || '').trim().toLowerCase()] = i; });
+  if (map.manifest_id === undefined || map.awb === undefined) return [];
+
+  const rows = [];
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][map.manifest_id] || '').trim() !== String(manifestId).trim()) continue;
+    rows.push({
+      sequence: Number(values[i][map.sequence] || i),
+      awb: String(values[i][map.awb] || '').trim()
+    });
+  }
+  rows.sort(function(a, b) { return a.sequence - b.sequence; });
+  return rows.map(function(item) { return item.awb; }).filter(Boolean);
+}
+
+function validateHandoverPhoto_(dataUrl) {
+  const match = String(dataUrl).match(/^data:(image\/(?:jpeg|jpg|png|webp));base64,([A-Za-z0-9+/=]+)$/i);
+  if (!match) throw new Error('Foto harus berupa JPEG, PNG, atau WebP.');
+  const bytes = Utilities.base64Decode(match[2]);
+  if (bytes.length > 8 * 1024 * 1024) throw new Error('Ukuran foto terlalu besar. Maksimal 8 MB.');
 }
 
 function getSessionUserForHandover_(token) {
@@ -174,7 +219,7 @@ function getRequiredSheetForHandover_(name) {
 function headerIndexForHandover_(headers) {
   const map = {};
   headers.forEach(function(h, i) { map[String(h || '').trim().toLowerCase().replace(/\s+/g, '_')] = i; });
-  ['manifest_id','manifest_number','manifest_date','shift','shift_name','drop_point_id','sprinter_id','sprinter_name','seller_id','seller_name','receiver_name','total_awb','status','pdf_url','handover_at','completed_at'].forEach(function(k) {
+  ['manifest_id','manifest_number','manifest_date','shift','shift_name','drop_point_id','sprinter_id','sprinter_name','seller_id','seller_name','receiver_name','receiver_phone','total_awb','status','pdf_file_id','pdf_url','handover_at','completed_at'].forEach(function(k) {
     if (map[k] === undefined) throw new Error('Kolom MANIFEST wajib: ' + k);
   });
   return map;
@@ -183,7 +228,7 @@ function headerIndexForHandover_(headers) {
 function headerIndexForHandoverTable_(headers) {
   const map = {};
   headers.forEach(function(h, i) { map[String(h || '').trim().toLowerCase().replace(/\s+/g, '_')] = i; });
-  ['handover_id','manifest_id','seller_id','seller_name','handover_at','handover_by','photo_file_id','photo_url','signature_file_id','signature_url','notes','status'].forEach(function(k) {
+  ['handover_id','manifest_id','seller_id','seller_name','handover_at','handover_by','status'].forEach(function(k) {
     if (map[k] === undefined) throw new Error('Kolom HANDOVER wajib: ' + k);
   });
   return map;
@@ -197,35 +242,6 @@ function handoverDateValue_(value) {
   if (!value) return '';
   if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) return value.toISOString();
   return String(value);
-}
-
-function getHandoverEvidenceFolderV2_(date, manifestNumber) {
-  const root = getOrCreateHandoverFolderV2_(DriveApp.getFoldersByName(HANDOVER_ROOT_FOLDER), HANDOVER_ROOT_FOLDER, null);
-  const handover = getOrCreateHandoverFolderV2_(root.getFoldersByName(HANDOVER_FOLDER), HANDOVER_FOLDER, root);
-  const yearName = Utilities.formatDate(date, 'Asia/Jakarta', 'yyyy');
-  const monthName = Utilities.formatDate(date, 'Asia/Jakarta', 'MM');
-  const dayName = Utilities.formatDate(date, 'Asia/Jakarta', 'dd');
-  const year = getOrCreateHandoverFolderV2_(handover.getFoldersByName(yearName), yearName, handover);
-  const month = getOrCreateHandoverFolderV2_(year.getFoldersByName(monthName), monthName, year);
-  const day = getOrCreateHandoverFolderV2_(month.getFoldersByName(dayName), dayName, month);
-  return getOrCreateHandoverFolderV2_(day.getFoldersByName(manifestNumber), manifestNumber, day);
-}
-
-function getOrCreateHandoverFolderV2_(iterator, name, parent) {
-  if (iterator.hasNext()) return iterator.next();
-  return parent ? parent.createFolder(name) : DriveApp.createFolder(name);
-}
-
-function saveHandoverEvidenceV2_(dataUrl, folder, baseName) {
-  const match = String(dataUrl).match(/^data:([^;]+);base64,(.+)$/);
-  if (!match) throw new Error('Format evidence base64 tidak valid.');
-  const mime = match[1];
-  const bytes = Utilities.base64Decode(match[2]);
-  let extension = 'jpg';
-  if (mime === 'image/png') extension = 'png';
-  else if (mime === 'image/webp') extension = 'webp';
-  const blob = Utilities.newBlob(bytes, mime, baseName + '.' + extension);
-  return folder.createFile(blob);
 }
 
 function writeHandoverAuditLog_(user, manifestId, manifestNumber, handoverId, timestamp) {
