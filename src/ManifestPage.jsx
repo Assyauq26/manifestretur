@@ -1,14 +1,40 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, Clock3, FileText, Loader2, Search, XCircle } from 'lucide-react';
+import { CheckCircle2, Clock3, FileText, Loader2, Search, XCircle, Home, CheckSquare, Clock } from 'lucide-react';
 
 const API_URL = 'https://script.google.com/macros/s/AKfycbxzFZV3HMqdRf8_sFQFCZ3qQcIhnRVEXLhzTYGD7OPjv-Q7khAvMdCk8jx90Ff9d10WUw/exec';
-const navItems = [['/','⌂','Home'],['/manifests','▤','Manifest'],['/handover','✓','Hand Over'],['/history','◷','Riwayat']];
-const goTo = (path) => { const hash = path === '/' ? '#/' : `#${path}`; if (window.location.hash !== hash) window.location.hash = hash; };
+
+const navItems = [
+  { path: '/', icon: Home, label: 'Home' },
+  { path: '/manifests', icon: FileText, label: 'Manifest' },
+  { path: '/handover', icon: CheckSquare, label: 'Hand Over' },
+  { path: '/history', icon: Clock, label: 'Riwayat' },
+];
+
+const goTo = (path) => {
+  const hash = path === '/' ? '#/' : `#${path}`;
+  if (window.location.hash !== hash) window.location.hash = hash;
+  else window.dispatchEvent(new HashChangeEvent('hashchange'));
+};
 
 function BottomNavigation(){
-  return <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around items-center h-16 z-50 max-w-md mx-auto">
-    {navItems.map(([path,icon,label])=><button key={path} type="button" onClick={()=>goTo(path)} className={`flex flex-col items-center justify-center w-full h-full ${path==='/manifests'?'text-[#D71920]':'text-gray-400'}`}><span className="text-xl leading-none">{icon}</span><span className="text-[10px] font-semibold mt-1">{label}</span></button>)}
-  </div>;
+  return (
+    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around items-center h-16 z-50 max-w-md mx-auto shadow-[0_-5px_10px_rgba(0,0,0,0.03)]">
+      {navItems.map(({ path, icon: Icon, label }) => {
+        const active = path === '/manifests';
+        return (
+          <button
+            key={path}
+            type="button"
+            onClick={() => goTo(path)}
+            className={`flex flex-col items-center justify-center w-full h-full ${active ? 'text-[#D71920]' : 'text-gray-400'}`}
+          >
+            <Icon size={23} strokeWidth={active ? 2.5 : 2} />
+            <span className={`text-[10px] font-semibold mt-1 ${active ? 'text-[#D71920]' : 'text-gray-500'}`}>{label}</span>
+          </button>
+        );
+      })}
+    </nav>
+  );
 }
 
 const statusStyle={READY_HANDOVER:['bg-amber-50','text-amber-700','Belum Serah'],COMPLETED:['bg-green-50','text-green-700','Sudah Serah']};
