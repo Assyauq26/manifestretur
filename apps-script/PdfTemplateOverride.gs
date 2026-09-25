@@ -84,6 +84,10 @@ function generatePdfDrive(manifestNumber, user, sellerName, receiverName, seller
   }
 
   const finalReceiver = safeReceiver || '-';
+  const handoverCompleted = Boolean(options.handoverPhotoBase64 && options.signatureData);
+  const manifestNote = handoverCompleted
+    ? 'Keterangan: Paket sudah diserahkan kepada PIC Seller.'
+    : 'Keterangan: Manifest dibuat dan menunggu serah terima kepada PIC Seller.';
   const signatureHtml = options.signatureData
     ? '<img class="signature-image" src="' + options.signatureData + '" alt="Tanda tangan PIC Seller" />'
     : '<div class="signature-placeholder">Belum serah terima</div>';
@@ -175,7 +179,7 @@ function generatePdfDrive(manifestNumber, user, sellerName, receiverName, seller
     <tr><td class="label">NO HP SPRINTER 电话号码</td><td class="value">${safeSprinterPhone}</td><td class="label">NO HP 电话号码</td><td class="value">${safeSellerPhone}</td></tr>
   </table>
 
-  <div class="note">Keterangan: Paket sudah diserahkan ke PIC Seller</div>
+  <div class="note">${manifestNote}</div>
 
   <table class="awb-table"><thead><tr><th class="no-head">NO</th><th class="awb-head">AWB 面单号码</th><th class="awb-head">AWB 面单号码</th><th class="awb-head">AWB 面单号码</th><th class="awb-head">AWB 面单号码</th><th class="awb-head">AWB 面单号码</th></tr></thead><tbody>${awbGridRows}</tbody></table>
 
