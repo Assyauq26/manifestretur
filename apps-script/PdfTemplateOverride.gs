@@ -1,9 +1,11 @@
 /**
  * Manifest PDF template override.
  *
- * The same generator is used for both the initial manifest PDF and the final
- * handover PDF. When options.handoverPhotoBase64 is supplied, a final A4 page
- * containing the handover photo is appended to the manifest PDF.
+ * Initial PDF: page 1 contains the manifest form and blank receiver/signature
+ * because the actual PIC Seller is only known at handover.
+ *
+ * Final PDF: the same manifest is regenerated with the actual receiver name,
+ * handwritten PIC Seller signature, and handover photo on the last page.
  * The photo is NOT stored as a separate Drive file.
  */
 
@@ -16,12 +18,19 @@ function getJTLogoDataUriOverride_() {
   return 'data:image/svg+xml;base64,' + Utilities.base64Encode(response.getBlob().getBytes());
 }
 
+function getSprinterDisplayNameForPdf_(value) {
+  const raw = String(value == null ? '' : value).trim();
+  if (!raw) return '';
+  return raw.replace(/\s*(?:[-–—]\s*)?sprinter\s*$/i, '').trim() || raw;
+}
+
 function generatePdfDrive(manifestNumber, user, sellerName, receiverName, sellerPhone, awbs, options) {
   options = options || {};
   const now = new Date();
   const dateStr = Utilities.formatDate(now, 'Asia/Jakarta', 'dd/MM/yyyy');
   const safeDropPoint = escapePdfHtml_(user.drop_point_id || '');
-  const safeSprinter = escapePdfHtml_(user.nama_sprinter || '');
+  const sprinterName = getSprinterDisplayNameForPdf_(user.nama_sprinter || '');
+  const safeSprinter = escapePdfHtml_(sprinterName);
   const safeSprinterPhone = escapePdfHtml_(user.no_hp || '');
   const safeSeller = escapePdfHtml_(sellerName || '');
   const safeReceiver = escapePdfHtml_(receiverName || '');
@@ -43,28 +52,41 @@ function generatePdfDrive(manifestNumber, user, sellerName, receiverName, seller
   let handoverPage = '';
   if (options.handoverPhotoBase64) {
     validateHandoverPhoto_(options.handoverPhotoBase64);
+    if (!options.signatureData) throw new Error('Tanda tangan PIC Seller wajib tersedia untuk PDF final.');
+    validateHandoverSignature_(options.signatureData);
+
     const handoverAt = options.handoverAt ? new Date(options.handoverAt) : now;
     const handoverDate = Utilities.formatDate(handoverAt, 'Asia/Jakarta', 'dd/MM/yyyy HH:mm');
-    const safeHandoverBy = escapePdfHtml_(options.handoverBy || safeSprinter);
-    const safeHandoverReceiver = escapePdfHtml_(options.receiverName || receiverName || 'PIC Seller');
+    const safeHandoverBy = escapePdfHtml_(options.handoverBy ? getSprinterDisplayNameForPdf_(options.handoverBy) : sprinterName);
+    const safeHandoverReceiver = escapePdfHtml_(options.receiverName || receiverName || '');
+    const signatureData = String(options.signatureData);
+
     handoverPage = `
       <div class="handover-page">
-        <div class="handover-brand">J&T EXPRESS</div>
+        <img class="handover-logo-image" src="${getJTLogoDataUriOverride_()}" alt="J&T Express" />
         <div class="handover-title">BUKTI SERAH TERIMA MANIFEST RETUR</div>
         <div class="handover-subtitle">DOKUMENTASI SERAH TERIMA BARANG KEPADA PIC SELLER</div>
+
         <table class="handover-info">
           <tr><td class="label">Nomor Manifest</td><td>${escapePdfHtml_(manifestNumber)}</td></tr>
           <tr><td class="label">Seller</td><td>${safeSeller}</td></tr>
-          <tr><td class="label">PIC Seller</td><td>${safeHandoverReceiver}</td></tr>
-          <tr><td class="label">Sprinter / Penyerah</td><td>${safeHandoverBy}</td></tr>
+          <tr><td class="label">PIC Seller / Penerima</td><td>${safeHandoverReceiver}</td></tr>
+          <tr><td class="label">Sprinter / Penyerah</td><td>${safeHandoverBy} <span class="role">(Sprinter)</span></td></tr>
           <tr><td class="label">Tanggal & Waktu</td><td>${handoverDate}</td></tr>
           <tr><td class="label">Status</td><td><strong>SUDAH DISERAHKAN</strong></td></tr>
         </table>
+
         <div class="photo-caption">FOTO BUKTI SERAH TERIMA</div>
         <div class="photo-frame"><img src="${options.handoverPhotoBase64}" alt="Bukti serah terima" /></div>
+
         <div class="handover-note">Foto ini merupakan bagian dari PDF manifest dan digunakan sebagai bukti dokumentasi serah terima.</div>
       </div>`;
   }
+
+  const finalReceiver = safeReceiver || '-';
+  const signatureHtml = options.signatureData
+    ? '<img class="signature-image" src="' + options.signatureData + '" alt="Tanda tangan PIC Seller" />'
+    : '<div class="signature-placeholder">Belum serah terima</div>';
 
   const htmlBody = `
 <!DOCTYPE html>
@@ -73,9 +95,19 @@ function generatePdfDrive(manifestNumber, user, sellerName, receiverName, seller
   * { box-sizing: border-box; }
   html, body { margin:0; padding:0; background:#fff; color:#111; font-family:Arial,"Noto Sans",sans-serif; font-size:8pt; line-height:1.05; }
   .page { width:100%; }
-  .top { position:relative; height:17mm; }
+  .top { position:relative; height:18mm; }
   .system { position:absolute; top:0; left:0; font-size:7.2pt; font-weight:700; white-space:nowrap; }
-  .logo-image { position:absolute; top:-1mm; right:7mm; width:39mm; height:auto; display:block; }
+  .logo-image {
+    position:absolute;
+    top:0;
+    right:6mm;
+    width:42mm;
+    max-height:13mm;
+    height:auto;
+    object-fit:contain;
+    object-position:center;
+    display:block;
+  }
   .date { position:absolute; left:0; bottom:0; font-size:7.8pt; font-weight:700; }
   .title { text-align:center; font-size:10.5pt; font-weight:800; margin-top:.5mm; }
   .subtitle { text-align:center; font-size:8pt; margin-top:.8mm; margin-bottom:2.2mm; }
@@ -101,14 +133,27 @@ function generatePdfDrive(manifestNumber, user, sellerName, receiverName, seller
   .signature { margin-top:1mm; }
   .signature td { width:50%; border:none; vertical-align:top; font-size:7.2pt; padding:0 5mm; }
   .signature .left { text-align:left; } .signature .right { text-align:right; }
-  .sign-gap { height:12.5mm; } .sign-name { font-weight:700; } .small { font-size:6.8pt; }
-  .handover-page { page-break-before:always; min-height:260mm; text-align:center; padding-top:5mm; }
-  .handover-brand { font-size:15pt; font-weight:900; letter-spacing:.5px; margin-bottom:5mm; }
+  .sign-gap { height:12.5mm; }
+  .sign-name { font-weight:700; }
+  .sign-role { font-size:6.8pt; margin-top:.7mm; }
+  .signature-placeholder { color:#777; font-size:6.8pt; padding-top:7mm; }
+  .signature-image { display:block; width:38mm; height:22mm; object-fit:contain; margin:0 0 1mm auto; }
+  .handover-page { page-break-before:always; min-height:260mm; text-align:center; padding-top:2mm; }
+  .handover-logo-image {
+    display:block;
+    width:44mm;
+    max-height:14mm;
+    height:auto;
+    object-fit:contain;
+    object-position:center;
+    margin:0 auto 5mm;
+  }
   .handover-title { font-size:14pt; font-weight:900; }
   .handover-subtitle { font-size:8pt; margin-top:2mm; color:#555; }
   .handover-info { margin:8mm auto 5mm; width:88%; font-size:9pt; text-align:left; }
   .handover-info td { border:.5pt solid #999; padding:2.2mm; }
   .handover-info .label { width:38%; font-weight:700; background:#f3f4f6; }
+  .handover-info .role { color:#555; }
   .photo-caption { font-size:9pt; font-weight:800; margin:5mm 0 2mm; }
   .photo-frame { width:88%; height:142mm; margin:0 auto; border:.8pt solid #777; padding:3mm; display:flex; align-items:center; justify-content:center; overflow:hidden; }
   .photo-frame img { max-width:100%; max-height:100%; width:auto; height:auto; object-fit:contain; display:block; }
@@ -122,25 +167,57 @@ function generatePdfDrive(manifestNumber, user, sellerName, receiverName, seller
   </div>
   <div class="title">FORM RETUR PENGEMBALIAN BARANG SELLER</div>
   <div class="subtitle">交接单 - 网点跟卖家</div>
+
   <table class="info-table">
     <tr><td class="section" colspan="2">DATA DROPPOINT 网点明细</td><td class="section" colspan="2">DATA SELLER 卖家明细</td></tr>
     <tr><td class="label">DROPPOINT 网点名称</td><td class="value">${safeDropPoint}</td><td class="label">NAMA SELLER DI SISTEM 卖家名称</td><td class="value">${safeSeller}</td></tr>
-    <tr><td class="label">NAMA LENGKAP SPRINTER 名称</td><td class="value">${safeSprinter}</td><td class="label">NAMA PENERIMA 名称</td><td class="value">${safeReceiver}</td></tr>
+    <tr><td class="label">NAMA LENGKAP SPRINTER 名称</td><td class="value">${safeSprinter} <span class="role">(Sprinter)</span></td><td class="label">NAMA PENERIMA 名称</td><td class="value">${finalReceiver}</td></tr>
     <tr><td class="label">NO HP SPRINTER 电话号码</td><td class="value">${safeSprinterPhone}</td><td class="label">NO HP 电话号码</td><td class="value">${safeSellerPhone}</td></tr>
   </table>
+
   <div class="note">Keterangan: Paket sudah diserahkan ke PIC Seller</div>
+
   <table class="awb-table"><thead><tr><th class="no-head">NO</th><th class="awb-head">AWB 面单号码</th><th class="awb-head">AWB 面单号码</th><th class="awb-head">AWB 面单号码</th><th class="awb-head">AWB 面单号码</th><th class="awb-head">AWB 面单号码</th></tr></thead><tbody>${awbGridRows}</tbody></table>
+
   <div class="total">总共多少票已交接 TOTAL barang yang telah dikembalikan <span class="total-line">${awbs.length}</span> AWB (票)</div>
-  <div class="footer"><div>Diatas adalah Data No AWB yang telah kami serahkan kepada PIC Seller.</div><div class="line">Form ini sebagai bukti untuk serah terima barang yang telah diretur oleh sprinter DP</div><div class="line">以上单号的货物已经交接给卖家的负责人并验收。这张表格是作为网点退回货物的证明而创建的</div><div class="thank">Terima kasih. 谢谢</div></div>
+
+  <div class="footer">
+    <div>Diatas adalah Data No AWB yang telah kami serahkan kepada PIC Seller.</div>
+    <div class="line">Form ini sebagai bukti untuk serah terima barang yang telah diretur oleh sprinter DP</div>
+    <div class="line">以上单号的货物已经交接给卖家的负责人并验收。这张表格是作为网点退回货物的证明而创建的</div>
+    <div class="thank">Terima kasih. 谢谢</div>
+  </div>
+
   <div class="city">Batang ,</div>
-  <table class="signature"><tr><td class="left">网点 DP<br>Yang Membuat<div class="sign-gap"></div><div class="sign-name">${safeSprinter}</div></td><td class="right">卖家 Seller<br>Yang Menerima<div class="sign-gap"></div><div class="sign-name">(Nama lengkap) 名字</div><div class="small">(PIC Seller) 卖家负责人</div></td></tr></table>
+
+  <table class="signature">
+    <tr>
+      <td class="left">
+        网点 DP<br>
+        Yang Membuat
+        <div class="sign-gap"></div>
+        <div class="sign-name">${safeSprinter}</div>
+        <div class="sign-role">(Sprinter)</div>
+      </td>
+      <td class="right">
+        卖家 Seller<br>
+        Yang Menerima
+        <div class="sign-gap"></div>
+        ${signatureHtml}
+        <div class="sign-name">${finalReceiver}</div>
+        <div class="sign-role">(PIC Seller)</div>
+      </td>
+    </tr>
+  </table>
 </div>
+
 ${handoverPage}
 </body></html>`;
 
   const blob = Utilities.newBlob(htmlBody, MimeType.HTML)
     .setName(manifestNumber + '.pdf')
     .getAs(MimeType.PDF);
+
   const year = Utilities.formatDate(now, 'Asia/Jakarta', 'yyyy');
   const month = Utilities.formatDate(now, 'Asia/Jakarta', 'MM');
   const day = Utilities.formatDate(now, 'Asia/Jakarta', 'dd');
