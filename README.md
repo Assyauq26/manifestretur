@@ -2,80 +2,102 @@
 
 Aplikasi mobile-first untuk proses manifest retur dan serah terima paket.
 
-## Current stack
+## Canonical branch
+
+**`main` adalah satu-satunya branch yang menjadi source of truth untuk implementasi aktif.**
+
+Branch eksperimen lama tidak menjadi referensi untuk copy/paste Apps Script. Untuk sinkronisasi manual ke Google Apps Script, gunakan file di `apps-script/` pada branch `main`.
+
+## Stack
 
 - React + Vite + Tailwind CSS
-- React Router HashRouter
-- Google Apps Script REST endpoint
-- Google Sheets + Google Drive
+- React Router HashRouter untuk flow utama
+- Google Apps Script sebagai REST backend
+- Google Sheets sebagai database operasional
+- Google Drive untuk penyimpanan PDF manifest
 - html5-qrcode untuk scanning AWB
 
-## Current phase
+## Canonical Apps Script modules
 
-Phase 1-6 sudah berjalan menurut project handover. Phase 7 (Hand Over & Evidence Capture) sudah memiliki frontend di `src/App.jsx` dan modul backend GAS di `apps-script/Phase7_Handover.gs`.
-
-## Phase 7 frontend contract
-
-The `/handover` page uses these backend actions:
-
-- `getReadyHandover`
-- `completeHandover`
-
-`completeHandover` menerima:
-
-- `userToken`
-- `manifestNumber`
-- `photoBase64`
-- `signatureBase64`
-- `handoverBy`
-
-Backend validates the session token and manifest scope, requires `READY_HANDOVER`, stores photo/signature evidence in Google Drive, then changes the manifest status to `COMPLETED`.
-
-## Handover V2 frontend
-
-`src/HandoverPage.jsx` adds:
-
-- custom success modal after successful handover;
-- manifest PDF link when returned by the backend/manifest data;
-- handover photo preview;
-- native device sharing of photo + caption/link to WhatsApp when supported;
-- WhatsApp text fallback when file sharing is unavailable;
-- pointer-based signature capture with device-pixel-ratio scaling for better finger alignment;
-- removal of completed manifests from the READY_HANDOVER list without redirecting to Home.
-
-## Google Apps Script integration
-
-`apps-script/Phase7_Handover.gs` is an additive module. It is intended to be added to the existing GAS project without replacing the existing login, seller, manifest, or PDF functions.
-
-Add these cases to the existing `doPost` action router:
-
-```javascript
-case 'getReadyHandover':
-  return phase7_json_(phase7_getReadyHandover_(payload));
-case 'completeHandover':
-  return phase7_json_(phase7_completeHandover_(payload));
+```text
+apps-script/
+├── Auth.gs
+├── Kode.gs
+├── Handover.gs
+├── ManifestHistory.gs
+├── PdfTemplateOverride.gs
+├── SchemaSetup.gs
+└── appsscript.json
 ```
 
-Keep the existing `doPost` response/error wrapper if the current backend already has one.
+Tanggung jawab utama:
 
-## Evidence storage
+- `Auth.gs` — login dan session token.
+- `Kode.gs` — API router, seller, generate manifest, AWB, response helpers.
+- `Handover.gs` — READY_HANDOVER dan COMPLETE_HANDOVER dengan nama penerima, TTD PIC Seller, dan foto.
+- `ManifestHistory.gs` — API read-only untuk menu Manifest dan Riwayat.
+- `PdfTemplateOverride.gs` — satu-satunya generator PDF manifest.
+- `SchemaSetup.gs` — schema dan migration additive.
+- `appsscript.json` — OAuth scopes dan konfigurasi web app.
 
-The Phase 7 module creates this Drive structure when needed:
+## Handover flow
 
-`MANIFEST_RETUR/HANDOVER/YYYY/MM/DD/<MANIFEST_NUMBER>/`
+1. Manifest dibuat dengan status `READY_HANDOVER`.
+2. PDF awal dibuat saat manifest dibuat.
+3. Pada halaman Hand Over, user mengisi:
+   - Nama lengkap PIC Seller/penerima.
+   - Tanda tangan PIC Seller dengan jari.
+   - Foto bukti serah terima.
+4. Backend meregenerasi PDF manifest dengan data handover.
+5. TTD penerima tampil pada halaman pertama PDF.
+6. Foto bukti serah terima tampil pada halaman terakhir PDF.
+7. Foto dan TTD tidak disimpan sebagai file Drive terpisah.
+8. Manifest berubah menjadi `COMPLETED`.
+9. PDF lama dipindahkan ke trash setelah PDF final berhasil dibuat.
 
-Files:
+## PDF rules
 
-- `<MANIFEST_NUMBER>_bukti.*`
-- `<MANIFEST_NUMBER>_signature.png`
+- Logo J&T Express diambil sebagai image data URI, bukan teks.
+- Nama pembuat manifest ditampilkan sebagai:
 
-The generated URLs are written to optional `MANIFEST` columns:
+```text
+Ahmad
+(Sprinter)
+```
 
-- `handover_at`
-- `handover_by`
-- `handover_photo_url`
-- `handover_signature_url`
+bukan `Ahmad Sprinter`.
+
+- Nama penerima pada PDF awal kosong dan diisi secara dinamis saat handover.
+- PDF final mempertahankan tanggal manifest asli pada halaman pertama.
+- Halaman kedua/final menggunakan logo J&T Express dan dokumentasi foto handover.
+
+## Frontend handover safeguards
+
+`src/HandoverPageV3.jsx` adalah UI handover canonical. Signature pad memetakan koordinat pointer dari CSS pixels ke drawing buffer sehingga tetap sejajar pada perangkat mobile dengan DPI/zoom berbeda. Setelah handover berhasil, modal baru menyediakan PDF final, share WhatsApp, kembali ke Beranda, atau tetap di Hand Over.
+
+`src/main.jsx` mengarahkan route `/handover`, `/manifests`, dan `/history` ke implementasi canonical tanpa page refresh.
+
+## Manifest & Riwayat
+
+- `getManifests` menyediakan filter status dan pencarian nomor manifest/seller.
+- `getHistory` menyediakan pencarian riwayat manifest dan handover.
+- Akses backend dibatasi berdasarkan session user; admin dapat melihat seluruh data, sedangkan sprinter dibatasi pada sprinter/drop point terkait.
+
+## Database migration
+
+Migration bersifat additive: kolom yang belum ada ditambahkan, data lama tidak dihapus.
+
+Setelah mengganti Apps Script dengan file dari `main`, jalankan **`migrateDatabaseSchema()`** atau **`migrateHandoverSchema()`** sekali untuk memastikan kolom handover berikut tersedia:
+
+```text
+receiver_name
+signature_data
+```
+
+Jangan menjalankan fungsi seed dummy pada database produksi.
 
 ## Deployment
 
-Netlify builds the frontend with `npm run build` and publishes `dist`. The live preview is deployed from the GitHub `main` branch.
+Netlify membangun frontend dengan `npm run build` dan mempublikasikan `dist` dari repository `main`.
+
+Google Apps Script harus menggunakan seluruh file pada `apps-script/` dari `main`, kemudian deployment web app perlu diperbarui agar deployment aktif memakai versi kode terbaru.
