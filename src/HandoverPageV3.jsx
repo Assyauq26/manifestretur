@@ -10,8 +10,8 @@ const navItems = [
   { path: '/history', icon: Clock, label: 'Riwayat' },
 ];
 
-const getManifestId = (manifest) => manifest?.manifestNumber || manifest?.manifest_number || manifest?.id || '';
-const getSellerName = (manifest) => manifest?.sellerName || manifest?.seller_name || 'Seller';
+const getManifestId = (m) => m?.manifestNumber || m?.manifest_number || m?.id || '';
+const getSellerName = (m) => m?.sellerName || m?.seller_name || 'Seller';
 
 function goTo(path) {
   window.location.hash = path === '/' ? '#/' : `#${path}`;
@@ -19,20 +19,45 @@ function goTo(path) {
 
 function BottomNavigation() {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around items-center h-16 z-50 max-w-md mx-auto shadow-[0_-5px_10px_rgba(0,0,0,0.02)]">
+    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex justify-around items-center h-16 z-50 max-w-md mx-auto shadow-[0_-5px_10px_rgba(0,0,0,0.03)]">
       {navItems.map(({ path, icon: Icon, label }) => (
-        <button
-          key={path}
-          type="button"
-          onClick={() => goTo(path)}
-          className={`flex flex-col items-center justify-center w-full h-full space-y-1 ${path === '/handover' ? 'text-[#D71920]' : 'text-gray-400'}`}
-        >
-          <Icon size={24} strokeWidth={path === '/handover' ? 2.5 : 2} />
-          <span className={`text-[10px] font-semibold ${path === '/handover' ? 'text-[#D71920]' : 'text-gray-500'}`}>{label}</span>
+        <button key={path} type="button" onClick={() => goTo(path)} className={`flex flex-col items-center justify-center w-full h-full ${path === '/handover' ? 'text-[#D71920]' : 'text-gray-400'}`}>
+          <Icon size={23} strokeWidth={path === '/handover' ? 2.5 : 2} />
+          <span className={`text-[10px] font-semibold mt-1 ${path === '/handover' ? 'text-[#D71920]' : 'text-gray-500'}`}>{label}</span>
         </button>
       ))}
     </nav>
   );
+}
+
+async function compressPhoto(file) {
+  if (!file.type.startsWith('image/')) throw new Error('File yang dipilih bukan foto.');
+  const source = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('Foto gagal dibaca.'));
+    reader.readAsDataURL(file);
+  });
+
+  const image = await new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Foto tidak dapat diproses.'));
+    img.src = source;
+  });
+
+  const maxSide = 1800;
+  const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+  const width = Math.max(1, Math.round(image.naturalWidth * scale));
+  const height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', { alpha: false });
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(image, 0, 0, width, height);
+  return canvas.toDataURL('image/jpeg', 0.82);
 }
 
 export default function HandoverPageV3() {
@@ -40,186 +65,64 @@ export default function HandoverPageV3() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedManifest, setSelectedManifest] = useState(null);
   const [photoPreview, setPhotoPreview] = useState('');
-  const [signature, setSignature] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successData, setSuccessData] = useState(null);
-  const canvasRef = useRef(null);
-  const drawingRef = useRef(false);
-  const hasInkRef = useRef(false);
-  const resizeObserverRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   const loadReadyHandover = useCallback(async () => {
     setIsLoading(true);
     try {
       const token = localStorage.getItem('retur_token');
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        body: JSON.stringify({ action: 'getReadyHandover', userToken: token })
-      });
+      const response = await fetch(API_URL, { method: 'POST', body: JSON.stringify({ action: 'getReadyHandover', userToken: token }) });
       const result = await response.json();
       if (!result.success) throw new Error(result.message || 'Gagal mengambil manifest handover.');
       setManifests(Array.isArray(result.data) ? result.data : []);
     } catch (error) {
-      console.error(error);
       setErrorMessage(error.message || 'Gagal mengambil data manifest.');
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    loadReadyHandover();
-  }, [loadReadyHandover]);
-
-  const setupCanvas = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const width = Math.max(1, Math.round(rect.width));
-    const height = Math.max(1, Math.round(rect.height));
-    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
-
-    canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(height * dpr);
-
-    const ctx = canvas.getContext('2d');
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.lineWidth = 2.2;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = '#111827';
-  }, []);
-
-  useEffect(() => {
-    if (!selectedManifest) return undefined;
-
-    const frame = window.requestAnimationFrame(() => {
-      setupCanvas();
-      if (typeof ResizeObserver !== 'undefined' && canvasRef.current) {
-        resizeObserverRef.current = new ResizeObserver(() => {
-          if (!drawingRef.current) setupCanvas();
-        });
-        resizeObserverRef.current.observe(canvasRef.current);
-      }
-    });
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      resizeObserverRef.current?.disconnect();
-      resizeObserverRef.current = null;
-    };
-  }, [selectedManifest, setupCanvas]);
-
-  const getPoint = (event) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return null;
-    const rect = canvas.getBoundingClientRect();
-    return {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top
-    };
-  };
-
-  const startSignature = (event) => {
-    event.preventDefault();
-    const canvas = canvasRef.current;
-    const point = getPoint(event);
-    if (!canvas || !point) return;
-
-    const ctx = canvas.getContext('2d');
-    ctx.beginPath();
-    ctx.moveTo(point.x, point.y);
-    ctx.lineWidth = 2.2;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = '#111827';
-    drawingRef.current = true;
-    hasInkRef.current = true;
-    try { canvas.setPointerCapture(event.pointerId); } catch (_) {}
-  };
-
-  const drawSignature = (event) => {
-    if (!drawingRef.current) return;
-    event.preventDefault();
-    const canvas = canvasRef.current;
-    const point = getPoint(event);
-    if (!canvas || !point) return;
-
-    const ctx = canvas.getContext('2d');
-    ctx.lineTo(point.x, point.y);
-    ctx.stroke();
-  };
-
-  const endSignature = (event) => {
-    if (!drawingRef.current) return;
-    drawingRef.current = false;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    try { canvas.releasePointerCapture(event.pointerId); } catch (_) {}
-    setSignature(hasInkRef.current ? canvas.toDataURL('image/png') : '');
-  };
-
-  const clearSignature = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 3));
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.lineWidth = 2.2;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = '#111827';
-    hasInkRef.current = false;
-    setSignature('');
-  };
+  useEffect(() => { loadReadyHandover(); }, [loadReadyHandover]);
 
   const openHandover = (manifest) => {
-    setSuccessData(null);
     setSelectedManifest(manifest);
     setPhotoPreview('');
-    setSignature('');
     setErrorMessage('');
-    hasInkRef.current = false;
-    drawingRef.current = false;
+    setSuccessData(null);
   };
 
   const closeHandover = () => {
     if (isSubmitting) return;
     setSelectedManifest(null);
     setPhotoPreview('');
-    setSignature('');
-    hasInkRef.current = false;
-    drawingRef.current = false;
   };
 
-  const handlePhoto = (event) => {
+  const handlePhoto = async (event) => {
     const file = event.target.files?.[0];
+    event.target.value = '';
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => setPhotoPreview(String(reader.result || ''));
-    reader.onerror = () => setErrorMessage('Foto gagal dibaca. Silakan ambil foto kembali.');
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressPhoto(file);
+      setPhotoPreview(compressed);
+      setErrorMessage('');
+    } catch (error) {
+      setErrorMessage(error.message || 'Foto gagal diproses.');
+    }
   };
 
   const submitHandover = async (event) => {
     event.preventDefault();
     if (!selectedManifest || isSubmitting) return;
-
     if (!photoPreview) {
       setErrorMessage('Foto bukti serah terima wajib diambil.');
-      return;
-    }
-    if (!signature || !hasInkRef.current) {
-      setErrorMessage('Tanda tangan PIC Seller wajib diisi.');
       return;
     }
 
     setIsSubmitting(true);
     setErrorMessage('');
-
     const manifestSnapshot = selectedManifest;
     const manifestNumber = getManifestId(manifestSnapshot);
     let savedUser = {};
@@ -234,39 +137,30 @@ export default function HandoverPageV3() {
           userToken: token,
           manifestNumber,
           photoBase64: photoPreview,
-          signatureBase64: signature,
           handoverBy: savedUser?.nama_sprinter || ''
         })
       });
       const result = await response.json();
-      if (!result.success) throw new Error(result.message || 'Gagal menyelesaikan handover.');
+      if (!result.success) throw new Error(result.message || 'Gagal menyelesaikan serah terima.');
 
       const data = result.data || {};
       setManifests((prev) => prev.filter((item) => getManifestId(item) !== manifestNumber));
       setSelectedManifest(null);
-      setPhotoPreview('');
-      setSignature('');
-      hasInkRef.current = false;
-      drawingRef.current = false;
       setSuccessData({
         manifestNumber: data.manifestNumber || manifestNumber,
-        handoverId: data.handoverId || '',
         sellerName: getSellerName(manifestSnapshot),
-        photoUrl: data.photoUrl || data.photo_url || '',
-        photoBase64: photoPreview,
         pdfUrl: data.pdfUrl || manifestSnapshot.pdfUrl || manifestSnapshot.pdf_url || ''
       });
+      setPhotoPreview('');
     } catch (error) {
-      console.error(error);
       setErrorMessage(error.message || 'Koneksi gagal. Silakan coba lagi.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const shareToWhatsApp = async () => {
+  const shareToWhatsApp = () => {
     if (!successData) return;
-
     const caption = [
       'SERAH TERIMA MANIFEST RETUR',
       '',
@@ -276,43 +170,23 @@ export default function HandoverPageV3() {
       'Manifest PDF:',
       successData.pdfUrl || '-'
     ].join('\n');
-
-    try {
-      if (successData.photoBase64) {
-        const response = await fetch(successData.photoBase64);
-        const blob = await response.blob();
-        const photoFile = new File([blob], `${successData.manifestNumber}-handover.jpg`, { type: blob.type || 'image/jpeg' });
-        if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [photoFile] }))) {
-          await navigator.share({
-            title: `Handover ${successData.manifestNumber}`,
-            text: caption,
-            files: [photoFile]
-          });
-          return;
-        }
-      }
-    } catch (error) {
-      if (error?.name === 'AbortError') return;
-      console.error('Native share error:', error);
-    }
-
-    window.location.href = `https://wa.me/?text=${encodeURIComponent(caption)}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(caption)}`, '_blank', 'noopener,noreferrer');
   };
 
   const closeSuccessModal = () => {
     setSuccessData(null);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    loadReadyHandover();
   };
 
   return (
     <div className="min-h-screen bg-gray-50 pb-20 max-w-md mx-auto shadow-sm relative">
-      <div className="bg-white px-5 py-4 sticky top-0 z-10 border-b border-gray-100">
+      <header className="bg-white px-5 py-4 sticky top-0 z-10 border-b border-gray-100">
         <h1 className="text-lg font-bold text-gray-900">Hand Over</h1>
-        <p className="text-xs text-gray-500">Manifest yang siap diserahkan ke seller</p>
-      </div>
+        <p className="text-xs text-gray-500">Foto serah terima akan masuk ke halaman terakhir PDF manifest</p>
+      </header>
 
       {errorMessage && (
-        <div className="fixed inset-0 z-[600] bg-black/50 flex items-center justify-center p-5" role="dialog" aria-modal="true">
+        <div className="fixed inset-0 z-[700] bg-black/50 flex items-center justify-center p-5" role="dialog" aria-modal="true">
           <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl">
             <div className="w-14 h-14 mx-auto rounded-full bg-red-50 flex items-center justify-center text-[#D71920]"><X size={28} /></div>
             <h3 className="text-lg font-bold text-gray-900 text-center mt-4">Terjadi Kesalahan</h3>
@@ -324,7 +198,7 @@ export default function HandoverPageV3() {
 
       <main className="p-5 space-y-4">
         {isLoading ? (
-          <div className="py-10 flex justify-center"><Loader2 className="animate-spin text-[#D71920]" /></div>
+          <div className="py-12 flex justify-center"><Loader2 className="animate-spin text-[#D71920]" /></div>
         ) : manifests.length === 0 ? (
           <div className="bg-white rounded-2xl p-8 text-center border border-dashed border-gray-300">
             <CheckSquare className="mx-auto text-gray-300" size={42} />
@@ -335,13 +209,13 @@ export default function HandoverPageV3() {
           const id = getManifestId(manifest);
           return (
             <button key={id} type="button" onClick={() => openHandover(manifest)} className="w-full text-left bg-white rounded-2xl p-4 border border-gray-100 shadow-sm active:scale-[0.99] transition-transform">
-              <div className="flex items-center justify-between">
-                <span className="font-mono font-bold text-gray-900">{id}</span>
-                <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-amber-50 text-amber-700">{manifest.status || 'READY_HANDOVER'}</span>
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-mono font-bold text-gray-900 truncate">{id}</span>
+                <span className="shrink-0 text-[10px] font-bold px-2 py-1 rounded-full bg-amber-50 text-amber-700">READY HANDOVER</span>
               </div>
               <div className="mt-3 text-sm text-gray-600">
-                <p>{getSellerName(manifest)}</p>
-                <p className="text-xs mt-1">{manifest.totalAwb || manifest.total_awb || 0} AWB • {manifest.shiftLabel || manifest.shift || '-'}</p>
+                <p className="font-semibold text-gray-800">{getSellerName(manifest)}</p>
+                <p className="text-xs mt-1">{manifest.totalAwb || manifest.total_awb || 0} AWB • {manifest.shift || manifest.shift_name || '-'}</p>
               </div>
             </button>
           );
@@ -362,43 +236,35 @@ export default function HandoverPageV3() {
             </div>
 
             <form onSubmit={submitHandover} className="space-y-5">
-              <div>
-                <label className="block text-sm font-semibold mb-2">Foto Bukti</label>
-                <label className="block rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50 p-4 text-center cursor-pointer">
-                  {photoPreview ? (
-                    <img src={photoPreview} alt="Bukti handover" className="w-full max-h-56 object-cover rounded-xl" />
-                  ) : (
-                    <>
-                      <Camera className="mx-auto text-[#D71920]" size={32} />
-                      <p className="text-sm font-semibold mt-2">Ambil / pilih foto</p>
-                      <p className="text-xs text-gray-400 mt-1">Gunakan kamera HP untuk bukti serah terima.</p>
-                    </>
-                  )}
-                  <input type="file" accept="image/*" capture="environment" onChange={handlePhoto} className="hidden" />
-                </label>
+              <div className="rounded-2xl bg-gray-50 p-4">
+                <p className="text-xs text-gray-500">Seller</p>
+                <p className="font-bold text-gray-900 mt-1">{getSellerName(selectedManifest)}</p>
+                <p className="text-xs text-gray-500 mt-2">{selectedManifest.totalAwb || selectedManifest.total_awb || 0} AWB</p>
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-semibold">Tanda Tangan PIC Seller</label>
-                  <button type="button" onClick={clearSignature} className="text-xs font-semibold text-[#D71920]">Hapus</button>
-                </div>
-                <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
-                  <canvas
-                    ref={canvasRef}
-                    className="block w-full h-48 bg-white touch-none"
-                    style={{ touchAction: 'none' }}
-                    onPointerDown={startSignature}
-                    onPointerMove={drawSignature}
-                    onPointerUp={endSignature}
-                    onPointerCancel={endSignature}
-                  />
-                </div>
-                <p className="text-[11px] text-gray-400 mt-2">Tanda tangan dengan jari pada area di atas.</p>
+                <label className="block text-sm font-semibold mb-2">Foto Bukti Serah Terima</label>
+                {photoPreview ? (
+                  <div className="relative rounded-2xl overflow-hidden bg-black border border-gray-200">
+                    <img src={photoPreview} alt="Preview bukti serah terima" className="w-full max-h-72 object-contain" />
+                    <button type="button" onClick={() => setPhotoPreview('')} className="absolute top-3 right-3 w-9 h-9 rounded-full bg-black/60 text-white flex items-center justify-center"><X size={18} /></button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => fileInputRef.current?.click()} className="w-full rounded-2xl border-2 border-dashed border-gray-200 bg-gray-50 p-8 flex flex-col items-center justify-center text-gray-500">
+                    <div className="w-14 h-14 rounded-full bg-red-50 text-[#D71920] flex items-center justify-center"><Camera size={28} /></div>
+                    <span className="mt-3 font-bold text-gray-800">Ambil Foto Serah Terima</span>
+                    <span className="text-xs mt-1">Foto akan dimasukkan ke PDF manifest</span>
+                  </button>
+                )}
+                <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={handlePhoto} className="hidden" />
               </div>
 
-              <button type="submit" disabled={isSubmitting} className="w-full py-4 rounded-2xl bg-[#D71920] text-white font-bold disabled:opacity-50 flex items-center justify-center">
-                {isSubmitting ? <><Loader2 size={20} className="animate-spin mr-2" /> MENYIMPAN...</> : 'SELESAIKAN SERAH TERIMA'}
+              <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-xs text-blue-800">
+                <strong>Catatan:</strong> Tidak ada lagi tanda tangan digital. Foto menjadi bukti serah terima dan otomatis ditempatkan di halaman terakhir PDF manifest.
+              </div>
+
+              <button type="submit" disabled={isSubmitting || !photoPreview} className="w-full py-4 rounded-2xl bg-[#D71920] text-white font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+                {isSubmitting ? <><Loader2 size={19} className="animate-spin" /> Memproses PDF...</> : <><CheckCircle2 size={19} /> Selesaikan Serah Terima</>}
               </button>
             </form>
           </div>
@@ -406,68 +272,15 @@ export default function HandoverPageV3() {
       )}
 
       {successData && (
-        <div className="fixed inset-0 z-[700] bg-black/60 flex items-end justify-center backdrop-blur-sm" role="dialog" aria-modal="true">
-          <div className="w-full max-w-md bg-white rounded-t-[32px] p-5 max-h-[94vh] overflow-y-auto shadow-2xl">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-green-700 bg-green-50 px-3 py-1.5 rounded-full">BERHASIL</span>
-              <button type="button" onClick={closeSuccessModal} className="text-sm text-gray-500">Tutup</button>
-            </div>
-
-            <div className="flex justify-center pt-4">
-              <div className="w-16 h-16 rounded-full bg-green-50 flex items-center justify-center">
-                <CheckCircle2 size={36} className="text-green-600" />
-              </div>
-            </div>
-
-            <div className="text-center mt-4">
-              <h2 className="text-2xl font-bold text-gray-900">Serah Terima Berhasil</h2>
-              <p className="text-sm text-gray-500 mt-1">Manifest berhasil diserahkan kepada seller.</p>
-            </div>
-
-            <div className="mt-5 bg-gray-50 rounded-2xl p-4 border border-gray-100">
-              <p className="text-[11px] text-gray-400 uppercase font-semibold">Nomor Manifest</p>
-              <p className="font-mono font-bold text-gray-900 mt-1 break-all">{successData.manifestNumber}</p>
-              <div className="h-px bg-gray-200 my-3" />
-              <p className="text-[11px] text-gray-400 uppercase font-semibold">Seller</p>
-              <p className="font-semibold text-gray-800 mt-1">{successData.sellerName}</p>
-            </div>
-
-            {successData.photoBase64 && (
-              <div className="mt-5">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-semibold text-gray-900">Foto Bukti Handover</p>
-                  {successData.photoUrl && <a href={successData.photoUrl} target="_blank" rel="noreferrer" className="text-xs font-semibold text-[#D71920]">Buka</a>}
-                </div>
-                <img src={successData.photoBase64} alt="Foto bukti handover" className="w-full max-h-64 object-cover rounded-2xl border border-gray-200" />
-              </div>
-            )}
-
-            <div className="mt-5">
-              <p className="text-sm font-semibold text-gray-900 mb-2">Manifest PDF</p>
-              {successData.pdfUrl ? (
-                <a href={successData.pdfUrl} target="_blank" rel="noreferrer" className="flex items-center justify-between p-4 rounded-2xl bg-red-50 border border-red-100">
-                  <div className="flex items-center min-w-0">
-                    <FileText size={24} className="text-[#D71920] mr-3 shrink-0" />
-                    <div className="min-w-0">
-                      <p className="font-semibold text-gray-900 text-sm">Buka Manifest PDF</p>
-                      <p className="text-xs text-gray-500 truncate">{successData.pdfUrl}</p>
-                    </div>
-                  </div>
-                  <span className="text-[#D71920] font-bold">›</span>
-                </a>
-              ) : (
-                <div className="p-4 rounded-2xl bg-gray-50 text-xs text-gray-500">Link PDF manifest belum tersedia dari server.</div>
-              )}
-            </div>
-
-            <button type="button" onClick={shareToWhatsApp} className="w-full mt-5 py-4 rounded-2xl bg-[#25D366] text-white font-bold flex items-center justify-center active:scale-[0.99] transition-transform">
-              <span className="text-xl mr-2">💬</span> KIRIM FOTO + LINK PDF KE WHATSAPP
-            </button>
-            <p className="text-[11px] text-gray-400 text-center mt-2 px-3">Jika perangkat mendukung berbagi file, pilih WhatsApp pada menu share agar foto ikut terlampir dan caption berisi link PDF.</p>
-
-            <div className="grid grid-cols-2 gap-3 mt-4">
-              <button type="button" onClick={closeSuccessModal} className="py-3.5 rounded-2xl border border-gray-200 text-gray-700 font-bold">Tutup</button>
-              <button type="button" onClick={() => goTo('/')} className="py-3.5 rounded-2xl bg-[#D71920] text-white font-bold">Ke Beranda</button>
+        <div className="fixed inset-0 z-[800] bg-black/55 flex items-center justify-center p-5" role="dialog" aria-modal="true">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl">
+            <div className="w-16 h-16 mx-auto rounded-full bg-green-50 text-green-600 flex items-center justify-center"><CheckCircle2 size={34} /></div>
+            <h3 className="text-xl font-bold text-gray-900 text-center mt-4">Serah Terima Berhasil</h3>
+            <p className="text-sm text-gray-500 text-center mt-2">Manifest <strong>{successData.manifestNumber}</strong> sudah ditandai sebagai COMPLETED.</p>
+            <div className="space-y-3 mt-6">
+              {successData.pdfUrl && <a href={successData.pdfUrl} target="_blank" rel="noreferrer" className="block w-full text-center py-3.5 rounded-2xl border border-gray-200 font-bold text-gray-800">Buka PDF Final</a>}
+              <button type="button" onClick={shareToWhatsApp} className="w-full py-3.5 rounded-2xl bg-[#25D366] text-white font-bold">Share Manifest ke WhatsApp</button>
+              <button type="button" onClick={closeSuccessModal} className="w-full py-3.5 rounded-2xl bg-gray-100 text-gray-800 font-bold">Kembali</button>
             </div>
           </div>
         </div>
