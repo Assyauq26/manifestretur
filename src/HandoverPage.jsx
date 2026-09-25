@@ -1,4 +1,4 @@
 // Compatibility entrypoint.
-// The active handover implementation is HandoverPageV3: photo-only handover,
-// no PIC Seller signature, and final PDF regeneration with the photo page.
+// The active handover implementation is HandoverPageV3: photo + PIC Seller
+// receiver name + handwritten signature, followed by final PDF regeneration.
 export { default } from './HandoverPageV3';
