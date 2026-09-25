@@ -1,9 +1,9 @@
 /**
  * MANIFEST RETUR - GOOGLE APPS SCRIPT BACKEND
- *
- * Phase 1-6: database/API, seller, manifest and AWB.
- * PDF generation is owned exclusively by PdfTemplateOverride.gs.
- * Handover routing is owned by Handover.gs.
+ * Canonical main-branch backend.
+ * PDF generation lives only in PdfTemplateOverride.gs.
+ * Handover lives only in Handover.gs.
+ * Manifest/History read APIs live in ManifestHistory.gs.
  */
 
 const PHASE7_READY_STATUS = 'READY_HANDOVER';
@@ -15,7 +15,9 @@ function doOptions(e) {
 
 function doPost(e) {
   try {
-    if (!e || !e.postData || !e.postData.contents) return createErrorResponse('Request body tidak ditemukan.', 400);
+    if (!e || !e.postData || !e.postData.contents) {
+      return createErrorResponse('Request body tidak ditemukan.', 400);
+    }
     const requestData = JSON.parse(e.postData.contents);
     const action = requestData.action;
 
@@ -26,10 +28,12 @@ function doPost(e) {
       case 'generateManifest': return handleGenerateManifest(requestData);
       case 'getReadyHandover': return handleGetReadyHandoverV2(requestData);
       case 'completeHandover': return handleCompleteHandoverV2(requestData);
+      case 'getManifests': return handleGetManifests_(requestData);
+      case 'getHistory': return handleGetHistory_(requestData);
       default: return createErrorResponse('Action tidak dikenal: ' + action, 400);
     }
   } catch (error) {
-    return createErrorResponse('Server error: ' + error.message, 500);
+    return createErrorResponse('Server error: ' + (error.message || error), 500);
   }
 }
 
@@ -72,7 +76,9 @@ function handleGenerateManifest(requestData) {
     const manifestSheet = ss.getSheetByName('MANIFEST');
     const awbSheet = ss.getSheetByName('MANIFEST_AWB');
     const sellerSheet = ss.getSheetByName('SELLER_MASTER');
-    if (!manifestSheet || !awbSheet || !sellerSheet) return createErrorResponse('Tabel database belum lengkap.', 500);
+    if (!manifestSheet || !awbSheet || !sellerSheet) {
+      return createErrorResponse('Tabel database belum lengkap.', 500);
+    }
 
     const shift = String(requestData.shift || '').trim();
     const sellerId = String(requestData.sellerId || '').trim();
@@ -86,7 +92,6 @@ function handleGenerateManifest(requestData) {
     if (awbs.length === 0) return createErrorResponse('Daftar AWB tidak boleh kosong.');
 
     const user = getSessionUserForManifest_(userToken);
-
     const sellerData = sellerSheet.getDataRange().getValues();
     if (sellerData.length < 2) return createErrorResponse('Data seller kosong.');
     const sellerHeaders = sellerData[0].map(String);
@@ -105,7 +110,9 @@ function handleGenerateManifest(requestData) {
     if (!sellerInfo) return createErrorResponse('Seller tidak ditemukan atau tidak aktif.');
 
     const sellerName = String(sellerInfo[sellerIdx.seller_name] || '').trim();
-    const receiverName = String(sellerInfo[sellerIdx.receiver_name] || '-').trim();
+    // Receiver is intentionally blank at manifest creation. The actual PIC Seller
+    // is entered and signed during handover, then written into the final PDF.
+    const receiverName = '';
     const sellerPhone = String(sellerInfo[sellerIdx.phone] || '-').trim();
     const today = new Date();
     const dateString = Utilities.formatDate(today, 'Asia/Jakarta', 'yyyyMMdd');
@@ -144,7 +151,7 @@ function handleGenerateManifest(requestData) {
     manifestRow[manifestIdx.shift] = shift;
     manifestRow[manifestIdx.shift_name] = shiftName;
     manifestRow[manifestIdx.drop_point_id] = user.drop_point_id || '';
-    manifestRow[manifestIdx.drop_point_name] = 'Nama DP Temp';
+    manifestRow[manifestIdx.drop_point_name] = user.drop_point_name || user.drop_point_id || '';
     manifestRow[manifestIdx.sprinter_id] = user.sprinter_id || '';
     manifestRow[manifestIdx.sprinter_name] = user.nama_sprinter || '';
     manifestRow[manifestIdx.sprinter_phone] = user.no_hp || '';
@@ -200,11 +207,8 @@ function getSessionUserForManifest_(token) {
   if (!token) throw new Error('Sesi tidak ditemukan. Silakan login kembali.');
   const raw = CacheService.getScriptCache().get(String(token));
   if (!raw) throw new Error('Sesi telah berakhir. Silakan login kembali.');
-  try {
-    return JSON.parse(raw);
-  } catch (e) {
-    throw new Error('Data sesi tidak valid. Silakan login kembali.');
-  }
+  try { return JSON.parse(raw); }
+  catch (e) { throw new Error('Data sesi tidak valid. Silakan login kembali.'); }
 }
 
 function indexHeaders_(headers, required, sheetName) {
