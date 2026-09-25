@@ -72,7 +72,6 @@ function handleGenerateManifest(requestData) {
   const sellerHeaders = sellerData[0];
   const sellerIdIdx = sellerHeaders.indexOf('seller_id');
   const sellerNameIdx = sellerHeaders.indexOf('seller_name');
-  const receiverNameIdx = sellerHeaders.indexOf('receiver_name');
   const sellerPhoneIdx = sellerHeaders.indexOf('phone');
   const sellerStatusIdx = sellerHeaders.indexOf('status');
   let sellerInfo = null;
@@ -82,8 +81,10 @@ function handleGenerateManifest(requestData) {
   if (!sellerInfo) return createErrorResponse('Seller tidak ditemukan atau tidak aktif.');
 
   const sellerName = sellerInfo[sellerNameIdx] || '';
-  const receiverName = sellerInfo[receiverNameIdx] || '-';
   const sellerPhone = sellerInfo[sellerPhoneIdx] || '-';
+  // Receiver name is intentionally empty at manifest creation.
+  // It must be entered and signed by the actual PIC Seller during handover.
+  const receiverName = '';
   const today = new Date();
   const dateString = Utilities.formatDate(today, 'Asia/Jakarta', 'yyyyMMdd');
   const prefix = 'MR-' + dateString + '-' + user.drop_point_id + '-';
