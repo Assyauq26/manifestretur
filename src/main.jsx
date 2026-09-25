@@ -2,14 +2,20 @@ import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App.jsx';
 import HandoverPageV3 from './HandoverPageV3.jsx';
+import ManifestPage from './ManifestPage.jsx';
+import HistoryPage from './HistoryPage.jsx';
 import './scanner-enhancement.js';
 import './index.css';
 
-const isHandoverRoute = () => window.location.hash === '#/handover' || window.location.hash.startsWith('#/handover?');
+function getSpecialRoute() {
+  const raw = window.location.hash.replace(/^#/, '') || '/';
+  const path = raw.split('?')[0];
+  if (path === '/handover') return 'handover';
+  if (path === '/manifests') return 'manifests';
+  if (path === '/history') return 'history';
+  return null;
+}
 
-// React Router's HashRouter uses history.pushState in some navigation paths.
-// Browsers do not emit hashchange for pushState, so bridge it into an app-level
-// event. This keeps the dedicated handover UI in sync without a page refresh.
 if (!window.__manifestReturHistoryBridge__) {
   window.__manifestReturHistoryBridge__ = true;
   ['pushState', 'replaceState'].forEach((method) => {
@@ -23,10 +29,10 @@ if (!window.__manifestReturHistoryBridge__) {
 }
 
 function Root() {
-  const [handoverRoute, setHandoverRoute] = useState(isHandoverRoute());
+  const [specialRoute, setSpecialRoute] = useState(getSpecialRoute());
 
   useEffect(() => {
-    const syncRoute = () => setHandoverRoute(isHandoverRoute());
+    const syncRoute = () => setSpecialRoute(getSpecialRoute());
     window.addEventListener('hashchange', syncRoute);
     window.addEventListener('popstate', syncRoute);
     window.addEventListener('manifestretur:navigation', syncRoute);
@@ -38,7 +44,12 @@ function Root() {
     };
   }, []);
 
-  if (handoverRoute) return <HandoverPageV3 />;
+  const token = localStorage.getItem('retur_token');
+  if (!token) return <App />;
+
+  if (specialRoute === 'handover') return <HandoverPageV3 />;
+  if (specialRoute === 'manifests') return <ManifestPage />;
+  if (specialRoute === 'history') return <HistoryPage />;
   return <App />;
 }
 
