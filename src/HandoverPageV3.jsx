@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Camera, CheckCircle2, CheckSquare, Clock, FileText, Home, Loader2, X } from 'lucide-react';
+import { Camera, CheckCircle2, CheckSquare, Clock, FileText, Home, Loader2, PenLine, X } from 'lucide-react';
 
 const API_URL = 'https://script.google.com/macros/s/AKfycbxzFZV3HMqdRf8_sFQFCZ3qQcIhnRVEXLhzTYGD7OPjv-Q7khAvMdCk8jx90Ff9d10WUw/exec';
 
@@ -60,11 +60,133 @@ async function compressPhoto(file) {
   return canvas.toDataURL('image/jpeg', 0.82);
 }
 
+function SignaturePad({ value, onChange, disabled }) {
+  const canvasRef = useRef(null);
+  const drawingRef = useRef(false);
+  const hasStrokeRef = useRef(false);
+
+  const setupCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const ratio = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    canvas.width = Math.max(1, Math.round(rect.width * ratio));
+    canvas.height = Math.max(1, Math.round(rect.height * ratio));
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, rect.width, rect.height);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#111827';
+    ctx.lineWidth = 2.2;
+    hasStrokeRef.current = false;
+  }, []);
+
+  useEffect(() => {
+    setupCanvas();
+    const handleResize = () => {
+      if (!value) setupCanvas();
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [setupCanvas, value]);
+
+  const getPoint = (event) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top
+    };
+  };
+
+  const start = (event) => {
+    if (disabled) return;
+    event.preventDefault();
+    const canvas = canvasRef.current;
+    canvas.setPointerCapture?.(event.pointerId);
+    const point = getPoint(event);
+    const ctx = canvas.getContext('2d');
+    ctx.beginPath();
+    ctx.moveTo(point.x, point.y);
+    drawingRef.current = true;
+    hasStrokeRef.current = true;
+  };
+
+  const move = (event) => {
+    if (!drawingRef.current || disabled) return;
+    event.preventDefault();
+    const point = getPoint(event);
+    const ctx = canvasRef.current.getContext('2d');
+    ctx.lineTo(point.x, point.y);
+    ctx.stroke();
+  };
+
+  const end = (event) => {
+    if (!drawingRef.current) return;
+    event.preventDefault();
+    drawingRef.current = false;
+    const canvas = canvasRef.current;
+    canvas.releasePointerCapture?.(event.pointerId);
+    if (hasStrokeRef.current) onChange(canvas.toDataURL('image/png'));
+  };
+
+  const clear = () => {
+    if (disabled) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.getBoundingClientRect();
+    const ratio = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, rect.width, rect.height);
+    hasStrokeRef.current = false;
+    onChange('');
+  };
+
+  useEffect(() => {
+    if (!value) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const img = new Image();
+    img.onload = () => {
+      const rect = canvas.getBoundingClientRect();
+      const ratio = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, rect.width, rect.height);
+      ctx.drawImage(img, 0, 0, rect.width, rect.height);
+      hasStrokeRef.current = true;
+    };
+    img.src = value;
+  }, [value]);
+
+  return (
+    <div>
+      <div className="relative rounded-2xl border border-gray-200 bg-white overflow-hidden">
+        <canvas
+          ref={canvasRef}
+          className="block w-full h-40 touch-none"
+          onPointerDown={start}
+          onPointerMove={move}
+          onPointerUp={end}
+          onPointerCancel={end}
+        />
+        {!value && <div className="pointer-events-none absolute inset-x-0 bottom-4 text-center text-xs text-gray-400">Tanda tangan dengan jari pada area di atas.</div>}
+      </div>
+      <div className="flex justify-end mt-2">
+        <button type="button" onClick={clear} disabled={disabled || !value} className="text-sm font-semibold text-[#D71920] disabled:text-gray-300">Hapus</button>
+      </div>
+    </div>
+  );
+}
+
 export default function HandoverPageV3() {
   const [manifests, setManifests] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedManifest, setSelectedManifest] = useState(null);
   const [photoPreview, setPhotoPreview] = useState('');
+  const [receiverName, setReceiverName] = useState('');
+  const [signatureData, setSignatureData] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [successData, setSuccessData] = useState(null);
@@ -90,6 +212,8 @@ export default function HandoverPageV3() {
   const openHandover = (manifest) => {
     setSelectedManifest(manifest);
     setPhotoPreview('');
+    setReceiverName('');
+    setSignatureData('');
     setErrorMessage('');
     setSuccessData(null);
   };
@@ -98,6 +222,8 @@ export default function HandoverPageV3() {
     if (isSubmitting) return;
     setSelectedManifest(null);
     setPhotoPreview('');
+    setReceiverName('');
+    setSignatureData('');
   };
 
   const handlePhoto = async (event) => {
@@ -120,6 +246,14 @@ export default function HandoverPageV3() {
       setErrorMessage('Foto bukti serah terima wajib diambil.');
       return;
     }
+    if (!receiverName.trim()) {
+      setErrorMessage('Nama penerima wajib diisi.');
+      return;
+    }
+    if (!signatureData) {
+      setErrorMessage('Tanda tangan PIC Seller wajib diisi.');
+      return;
+    }
 
     setIsSubmitting(true);
     setErrorMessage('');
@@ -137,6 +271,8 @@ export default function HandoverPageV3() {
           userToken: token,
           manifestNumber,
           photoBase64: photoPreview,
+          receiverName: receiverName.trim(),
+          signatureData,
           handoverBy: savedUser?.nama_sprinter || ''
         })
       });
@@ -149,9 +285,12 @@ export default function HandoverPageV3() {
       setSuccessData({
         manifestNumber: data.manifestNumber || manifestNumber,
         sellerName: getSellerName(manifestSnapshot),
+        receiverName: data.receiverName || receiverName.trim(),
         pdfUrl: data.pdfUrl || manifestSnapshot.pdfUrl || manifestSnapshot.pdf_url || ''
       });
       setPhotoPreview('');
+      setReceiverName('');
+      setSignatureData('');
     } catch (error) {
       setErrorMessage(error.message || 'Koneksi gagal. Silakan coba lagi.');
     } finally {
@@ -166,6 +305,7 @@ export default function HandoverPageV3() {
       '',
       `Manifest: ${successData.manifestNumber}`,
       `Seller: ${successData.sellerName}`,
+      `PIC Penerima: ${successData.receiverName}`,
       '',
       'Manifest PDF:',
       successData.pdfUrl || '-'
@@ -182,7 +322,7 @@ export default function HandoverPageV3() {
     <div className="min-h-screen bg-gray-50 pb-20 max-w-md mx-auto shadow-sm relative">
       <header className="bg-white px-5 py-4 sticky top-0 z-10 border-b border-gray-100">
         <h1 className="text-lg font-bold text-gray-900">Hand Over</h1>
-        <p className="text-xs text-gray-500">Foto serah terima akan masuk ke halaman terakhir PDF manifest</p>
+        <p className="text-xs text-gray-500">Foto dan TTD penerima akan masuk ke halaman terakhir PDF manifest</p>
       </header>
 
       {errorMessage && (
@@ -243,6 +383,24 @@ export default function HandoverPageV3() {
               </div>
 
               <div>
+                <label className="block text-sm font-semibold mb-2">Nama Penerima (PIC Seller)</label>
+                <input
+                  value={receiverName}
+                  onChange={(event) => setReceiverName(event.target.value)}
+                  type="text"
+                  autoComplete="name"
+                  placeholder="Masukkan nama lengkap penerima"
+                  className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3.5 text-sm outline-none focus:border-[#D71920]"
+                  disabled={isSubmitting}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold mb-2 flex items-center gap-2"><PenLine size={17} /> Tanda Tangan PIC Seller</label>
+                <SignaturePad value={signatureData} onChange={setSignatureData} disabled={isSubmitting} />
+              </div>
+
+              <div>
                 <label className="block text-sm font-semibold mb-2">Foto Bukti Serah Terima</label>
                 {photoPreview ? (
                   <div className="relative rounded-2xl overflow-hidden bg-black border border-gray-200">
@@ -260,10 +418,10 @@ export default function HandoverPageV3() {
               </div>
 
               <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4 text-xs text-blue-800">
-                <strong>Catatan:</strong> Tidak ada lagi tanda tangan digital. Foto menjadi bukti serah terima dan otomatis ditempatkan di halaman terakhir PDF manifest.
+                <strong>Catatan:</strong> Nama penerima dan TTD PIC Seller akan dicetak pada manifest final. Foto serah terima ditempatkan di halaman terakhir PDF.
               </div>
 
-              <button type="submit" disabled={isSubmitting || !photoPreview} className="w-full py-4 rounded-2xl bg-[#D71920] text-white font-bold disabled:opacity-50 flex items-center justify-center gap-2">
+              <button type="submit" disabled={isSubmitting || !photoPreview || !receiverName.trim() || !signatureData} className="w-full py-4 rounded-2xl bg-[#D71920] text-white font-bold disabled:opacity-50 flex items-center justify-center gap-2">
                 {isSubmitting ? <><Loader2 size={19} className="animate-spin" /> Memproses PDF...</> : <><CheckCircle2 size={19} /> Selesaikan Serah Terima</>}
               </button>
             </form>
