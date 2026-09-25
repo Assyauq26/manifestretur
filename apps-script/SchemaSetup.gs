@@ -1,8 +1,7 @@
 /**
  * PHASE 1: Database Schema Setup
- * Handover is photo-only. Signature columns are no longer required.
- * Existing legacy signature columns are intentionally left untouched by
- * migration so old spreadsheet data is not destroyed.
+ * Handover stores receiver name + signature metadata.
+ * Existing legacy columns are intentionally left untouched by migration.
  */
 
 function getDatabaseSchemaConfig_() {
@@ -12,7 +11,7 @@ function getDatabaseSchemaConfig_() {
     { name:'DROP_POINT_MASTER', headers:['drop_point_id','code','name','address','status'] },
     { name:'MANIFEST', headers:['manifest_id','manifest_number','manifest_date','shift','shift_name','drop_point_id','drop_point_name','sprinter_id','sprinter_name','sprinter_phone','seller_id','seller_name','receiver_name','receiver_phone','total_awb','status','pdf_file_id','pdf_url','created_at','created_by','updated_at','updated_by','generated_at','handover_at','completed_at'] },
     { name:'MANIFEST_AWB', headers:['manifest_awb_id','manifest_id','awb','sequence','input_method','scanned_at','scanned_by','status'] },
-    { name:'HANDOVER', headers:['handover_id','manifest_id','seller_id','seller_name','handover_at','handover_by','photo_file_id','photo_url','notes','status'] },
+    { name:'HANDOVER', headers:['handover_id','manifest_id','seller_id','seller_name','receiver_name','handover_at','handover_by','photo_file_id','photo_url','signature_data','notes','status'] },
     { name:'AUDIT_LOG', headers:['timestamp','user_id','user_name','role','action','object_type','object_id','detail'] },
     { name:'CONFIG', headers:['key','value','description'] }
   ];
@@ -76,7 +75,7 @@ function migrateHandoverSchema() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName('HANDOVER');
   if (!sheet) throw new Error('Sheet HANDOVER tidak ditemukan. Jalankan setupDatabaseSchema terlebih dahulu.');
-  const requiredHeaders = ['handover_id','manifest_id','seller_id','seller_name','handover_at','handover_by','photo_file_id','photo_url','notes','status'];
+  const requiredHeaders = ['handover_id','manifest_id','seller_id','seller_name','receiver_name','handover_at','handover_by','photo_file_id','photo_url','signature_data','notes','status'];
   const lastColumn = Math.max(sheet.getLastColumn(),1);
   const existingHeaders = sheet.getRange(1,1,1,lastColumn).getValues()[0].map(function(h){return String(h||'').trim();});
   const existingSet = {};
@@ -92,7 +91,7 @@ function migrateHandoverSchema() {
   });
   sheet.setFrozenRows(1);
   SpreadsheetApp.flush();
-  Logger.log(added.length ? 'HANDOVER schema updated: ' + added.join(', ') : 'HANDOVER schema sudah sesuai. Legacy signature columns, jika ada, dibiarkan untuk kompatibilitas data lama.');
+  Logger.log(added.length ? 'HANDOVER schema updated: ' + added.join(', ') : 'HANDOVER schema sudah sesuai. Legacy columns, jika ada, dibiarkan untuk kompatibilitas data lama.');
   return added;
 }
 
