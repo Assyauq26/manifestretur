@@ -1,15 +1,9 @@
 /**
  * PHASE 7: HANDOVER
- * Canonical PHOTO-ONLY implementation.
- *
- * Flow:
- * 1. Manifest must be READY_HANDOVER.
- * 2. User submits one compressed photo as base64.
- * 3. Photo is embedded into the existing manifest PDF as the final page.
- * 4. The old PDF is replaced by the updated PDF.
- * 5. No handover photo or signature file is stored in Drive.
- * 6. HANDOVER remains the transaction/audit table; legacy signature columns
- *    are kept blank for backward compatibility with the existing schema.
+ * Canonical PHOTO + PIC SELLER receiver name + handwritten signature flow.
+ * The final manifest PDF is regenerated with the signature on page 1 and
+ * the handover photo on the final page. Photo/signature are not stored as
+ * separate Drive files.
  */
 
 const HANDOVER_READY_STATUS = 'READY_HANDOVER';
@@ -20,10 +14,7 @@ function handleGetReadyHandoverV2(requestData) {
     const user = getSessionUserForHandover_(requestData && requestData.userToken);
     const sheet = getRequiredSheetForHandover_('MANIFEST');
     const values = sheet.getDataRange().getValues();
-
-    if (values.length < 2) {
-      return createJsonResponse({ success: true, data: [] });
-    }
+    if (values.length < 2) return createJsonResponse({ success: true, data: [] });
 
     const headers = values[0].map(String);
     const idx = headerIndexForHandover_(headers);
@@ -38,7 +29,6 @@ function handleGetReadyHandoverV2(requestData) {
       const allowed = isAdmin ||
         sameValueForHandover_(row[idx.sprinter_id], user.sprinter_id) ||
         sameValueForHandover_(row[idx.drop_point_id], user.drop_point_id);
-
       if (!allowed) continue;
 
       result.push({
@@ -65,32 +55,28 @@ function handleGetReadyHandoverV2(requestData) {
 
 function handleCompleteHandoverV2(requestData) {
   let lock;
-
   try {
     const user = getSessionUserForHandover_(requestData && requestData.userToken);
     const manifestNumber = String(requestData && requestData.manifestNumber || '').trim();
     const photoBase64 = String(requestData && requestData.photoBase64 || '').trim();
+    const receiverName = String(requestData && requestData.receiverName || '').trim();
+    const signatureData = String(requestData && requestData.signatureData || '').trim();
 
-    if (!manifestNumber) {
-      return createErrorResponse('Nomor manifest wajib diisi.');
-    }
+    if (!manifestNumber) return createErrorResponse('Nomor manifest wajib diisi.');
+    if (!receiverName) return createErrorResponse('Nama penerima PIC Seller wajib diisi.');
+    if (!photoBase64) return createErrorResponse('Foto bukti serah terima wajib diambil.');
+    if (!signatureData) return createErrorResponse('Tanda tangan PIC Seller wajib diisi.');
 
-    if (!photoBase64) {
-      return createErrorResponse('Foto bukti serah terima wajib diisi.');
-    }
-
-    validateHandoverPhotoDataUrl_(photoBase64);
+    validateHandoverPhoto_(photoBase64);
+    validateHandoverSignature_(signatureData);
 
     lock = LockService.getScriptLock();
-    lock.waitLock(15000);
+    lock.waitLock(20000);
 
     const manifestSheet = getRequiredSheetForHandover_('MANIFEST');
     const handoverSheet = getRequiredSheetForHandover_('HANDOVER');
     const manifestValues = manifestSheet.getDataRange().getValues();
-
-    if (manifestValues.length < 2) {
-      return createErrorResponse('Manifest tidak ditemukan.');
-    }
+    if (manifestValues.length < 2) return createErrorResponse('Manifest tidak ditemukan.');
 
     const manifestHeaders = manifestValues[0].map(String);
     const idx = headerIndexForHandover_(manifestHeaders);
@@ -105,94 +91,80 @@ function handleCompleteHandoverV2(requestData) {
       }
     }
 
-    if (rowNumber < 0) {
-      return createErrorResponse('Manifest ' + manifestNumber + ' tidak ditemukan.');
-    }
+    if (rowNumber < 0) return createErrorResponse('Manifest ' + manifestNumber + ' tidak ditemukan.');
 
     const status = String(manifestRow[idx.status] || '').trim().toUpperCase();
     if (status !== HANDOVER_READY_STATUS) {
-      return createErrorResponse(
-        'Manifest tidak dapat diserahkan. Status saat ini: ' + (status || 'KOSONG')
-      );
+      return createErrorResponse('Manifest tidak dapat diserahkan. Status saat ini: ' + (status || 'KOSONG'));
     }
 
     const isAdmin = String(user.role || '').trim().toUpperCase() === 'ADMIN';
     const allowed = isAdmin ||
       sameValueForHandover_(manifestRow[idx.sprinter_id], user.sprinter_id) ||
       sameValueForHandover_(manifestRow[idx.drop_point_id], user.drop_point_id);
+    if (!allowed) return createErrorResponse('Anda tidak memiliki akses ke manifest ini.', 403);
 
-    if (!allowed) {
-      return createErrorResponse('Anda tidak memiliki akses ke manifest ini.', 403);
-    }
-
+    const now = new Date();
     const manifestId = String(manifestRow[idx.manifest_id] || '').trim();
     const sellerId = String(manifestRow[idx.seller_id] || '').trim();
     const sellerName = String(manifestRow[idx.seller_name] || '').trim();
-    const sellerPhone = String(manifestRow[idx.receiver_phone] || '').trim();
-    const oldPdfFileId = String(manifestRow[idx.pdf_file_id] || '').trim();
+    const receiverPhone = String(manifestRow[idx.receiver_phone] || '').trim();
+    const oldPdfId = String(manifestRow[idx.pdf_file_id] || '').trim();
     const oldPdfUrl = String(manifestRow[idx.pdf_url] || '').trim();
-    const now = new Date();
+    const handoverBy = String(requestData.handoverBy || user.nama_sprinter || user.sprinter_id || '').trim();
 
-    if (!manifestId) {
-      return createErrorResponse('Manifest ID kosong. Data manifest tidak valid.', 500);
-    }
+    if (!manifestId) return createErrorResponse('Manifest ID kosong. Data manifest tidak valid.', 500);
 
     const awbs = getManifestAwbsForHandover_(manifestId);
-    if (awbs.length === 0) {
-      return createErrorResponse('AWB manifest tidak ditemukan. PDF tidak dapat diperbarui.', 500);
-    }
+    if (!awbs.length) return createErrorResponse('AWB manifest tidak ditemukan.');
 
-    // Rebuild the same manifest form and append the evidence photo as its last page.
-    // The photo is never written to Drive as a separate file.
-    const pdfUser = {
-      drop_point_id: String(manifestRow[idx.drop_point_id] || user.drop_point_id || ''),
-      nama_sprinter: String(manifestRow[idx.sprinter_name] || user.nama_sprinter || ''),
-      no_hp: String(manifestRow[idx.sprinter_phone] || user.no_hp || '')
-    };
-
-    const pdfResult = generatePdfDrive(
+    const finalPdf = generatePdfDrive(
       manifestNumber,
-      pdfUser,
+      user,
       sellerName,
-      String(manifestRow[idx.receiver_name] || '-'),
-      sellerPhone || '-',
+      receiverName,
+      receiverPhone,
       awbs,
-      photoBase64,
-      oldPdfFileId,
-      manifestRow[idx.manifest_date]
+      {
+        handoverPhotoBase64: photoBase64,
+        handoverAt: now,
+        handoverBy: handoverBy,
+        receiverName: receiverName,
+        signatureData: signatureData,
+        manifestDate: manifestRow[idx.manifest_date]
+      }
     );
 
     const handoverHeaders = handoverSheet.getDataRange().getValues()[0].map(String);
     const hidx = headerIndexForHandoverTable_(handoverHeaders);
     const handoverId = Utilities.getUuid();
-    const handoverBy = String(
-      requestData.handoverBy || user.nama_sprinter || user.sprinter_id || ''
-    ).trim();
-
     const handoverRow = new Array(handoverHeaders.length).fill('');
     handoverRow[hidx.handover_id] = handoverId;
     handoverRow[hidx.manifest_id] = manifestId;
     handoverRow[hidx.seller_id] = sellerId;
     handoverRow[hidx.seller_name] = sellerName;
+    handoverRow[hidx.receiver_name] = receiverName;
     handoverRow[hidx.handover_at] = now;
     handoverRow[hidx.handover_by] = handoverBy;
-    // PHOTO-ONLY: no photo file is stored in Drive.
-    handoverRow[hidx.photo_file_id] = '';
-    handoverRow[hidx.photo_url] = '';
-    // Legacy signature columns remain blank after the TTD feature was removed.
-    handoverRow[hidx.signature_file_id] = '';
-    handoverRow[hidx.signature_url] = '';
-    handoverRow[hidx.notes] = String(requestData.notes || 'PHOTO_ONLY | FOTO_EMBEDDED_TO_MANIFEST_PDF');
+    if (hidx.photo_file_id !== undefined) handoverRow[hidx.photo_file_id] = '';
+    if (hidx.photo_url !== undefined) handoverRow[hidx.photo_url] = '';
+    if (hidx.signature_data !== undefined) handoverRow[hidx.signature_data] = signatureData;
+    if (hidx.notes !== undefined) handoverRow[hidx.notes] = String(requestData.notes || '');
     handoverRow[hidx.status] = HANDOVER_COMPLETED_STATUS;
     handoverSheet.appendRow(handoverRow);
 
     manifestSheet.getRange(rowNumber, idx.status + 1).setValue(HANDOVER_COMPLETED_STATUS);
     manifestSheet.getRange(rowNumber, idx.handover_at + 1).setValue(now);
     manifestSheet.getRange(rowNumber, idx.completed_at + 1).setValue(now);
-    manifestSheet.getRange(rowNumber, idx.pdf_file_id + 1).setValue(pdfResult.id);
-    manifestSheet.getRange(rowNumber, idx.pdf_url + 1).setValue(pdfResult.url);
-    manifestSheet.getRange(rowNumber, idx.updated_at + 1).setValue(now);
-    manifestSheet.getRange(rowNumber, idx.updated_by + 1).setValue(user.sprinter_id || handoverBy);
+    manifestSheet.getRange(rowNumber, idx.receiver_name + 1).setValue(receiverName);
+    manifestSheet.getRange(rowNumber, idx.pdf_file_id + 1).setValue(finalPdf.id);
+    manifestSheet.getRange(rowNumber, idx.pdf_url + 1).setValue(finalPdf.url);
+    if (idx.updated_at !== undefined) manifestSheet.getRange(rowNumber, idx.updated_at + 1).setValue(now);
+    if (idx.updated_by !== undefined) manifestSheet.getRange(rowNumber, idx.updated_by + 1).setValue(handoverBy);
+
+    if (oldPdfId && oldPdfId !== finalPdf.id) {
+      try { DriveApp.getFileById(oldPdfId).setTrashed(true); } catch (_) {}
+    }
 
     writeHandoverAuditLog_(user, manifestId, manifestNumber, handoverId, now);
 
@@ -205,19 +177,15 @@ function handleCompleteHandoverV2(requestData) {
         handoverId: handoverId,
         status: HANDOVER_COMPLETED_STATUS,
         handoverAt: now.toISOString(),
+        receiverName: receiverName,
+        pdfUrl: finalPdf.url,
+        pdfFileId: finalPdf.id,
         photoUrl: '',
-        photoStoredInDrive: false,
-        signatureUrl: '',
-        pdfUpdated: true,
-        pdfUrl: pdfResult.url,
-        previousPdfUrl: oldPdfUrl
+        photoStoredInDrive: false
       }
     });
   } catch (error) {
-    return createErrorResponse(
-      error.message || 'Gagal menyelesaikan serah terima.',
-      500
-    );
+    return createErrorResponse(error.message || 'Gagal menyelesaikan serah terima.', 500);
   } finally {
     if (lock) lock.releaseLock();
   }
@@ -227,67 +195,44 @@ function getManifestAwbsForHandover_(manifestId) {
   const sheet = getRequiredSheetForHandover_('MANIFEST_AWB');
   const values = sheet.getDataRange().getValues();
   if (values.length < 2) return [];
-
   const headers = values[0].map(String);
-  const idx = {};
-  headers.forEach(function(header, i) {
-    idx[String(header || '').trim().toLowerCase().replace(/\s+/g, '_')] = i;
+  const map = {};
+  headers.forEach(function(h, i) {
+    map[String(h || '').trim().toLowerCase().replace(/\s+/g, '_')] = i;
   });
-
-  ['manifest_id', 'awb', 'sequence'].forEach(function(key) {
-    if (idx[key] === undefined) {
-      throw new Error('Kolom MANIFEST_AWB wajib: ' + key);
-    }
-  });
+  if (map.manifest_id === undefined || map.awb === undefined) return [];
 
   const rows = [];
-  for (let r = 1; r < values.length; r++) {
-    const row = values[r];
-    if (String(row[idx.manifest_id] || '').trim() !== manifestId) continue;
-
-    const awb = String(row[idx.awb] || '').trim();
-    if (!awb) continue;
-
-    rows.push({
-      awb: awb,
-      sequence: Number(row[idx.sequence] || 0)
-    });
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][map.manifest_id] || '').trim() !== String(manifestId).trim()) continue;
+    rows.push({ sequence: Number(values[i][map.sequence] || i), awb: String(values[i][map.awb] || '').trim() });
   }
-
-  rows.sort(function(a, b) {
-    return a.sequence - b.sequence;
-  });
-
-  return rows.map(function(item) { return item.awb; });
+  rows.sort(function(a, b) { return a.sequence - b.sequence; });
+  return rows.map(function(item) { return item.awb; }).filter(Boolean);
 }
 
-function validateHandoverPhotoDataUrl_(dataUrl) {
+function validateHandoverPhoto_(dataUrl) {
   const match = String(dataUrl || '').match(/^data:(image\/(?:jpeg|jpg|png|webp));base64,([A-Za-z0-9+/=]+)$/i);
-  if (!match) {
-    throw new Error('Format foto tidak valid. Gunakan JPG, PNG, atau WEBP.');
-  }
-
+  if (!match) throw new Error('Foto harus berupa JPEG, PNG, atau WebP.');
   const bytes = Utilities.base64Decode(match[2]);
-  if (!bytes || bytes.length === 0) {
-    throw new Error('Foto bukti serah terima kosong.');
-  }
+  if (!bytes || bytes.length === 0) throw new Error('Foto bukti serah terima kosong.');
+  if (bytes.length > 8 * 1024 * 1024) throw new Error('Ukuran foto terlalu besar. Maksimal 8 MB.');
+}
 
-  // Keep the request intentionally bounded so a very large camera image does
-  // not turn a handover request into an oversized Apps Script execution.
-  if (bytes.length > 3 * 1024 * 1024) {
-    throw new Error('Ukuran foto terlalu besar. Gunakan foto yang sudah dikompresi.');
-  }
+function validateHandoverSignature_(dataUrl) {
+  const match = String(dataUrl || '').match(/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/i);
+  if (!match) throw new Error('Tanda tangan tidak valid.');
+  const bytes = Utilities.base64Decode(match[1]);
+  if (!bytes || bytes.length === 0) throw new Error('Tanda tangan kosong.');
+  if (bytes.length > 2 * 1024 * 1024) throw new Error('Ukuran tanda tangan terlalu besar.');
 }
 
 function getSessionUserForHandover_(token) {
   if (!token) throw new Error('Sesi tidak ditemukan. Silakan login kembali.');
   const raw = CacheService.getScriptCache().get(String(token));
   if (!raw) throw new Error('Sesi telah berakhir. Silakan login kembali.');
-  try {
-    return JSON.parse(raw);
-  } catch (e) {
-    throw new Error('Data sesi tidak valid. Silakan login kembali.');
-  }
+  try { return JSON.parse(raw); }
+  catch (e) { throw new Error('Data sesi tidak valid. Silakan login kembali.'); }
 }
 
 function getRequiredSheetForHandover_(name) {
@@ -298,57 +243,39 @@ function getRequiredSheetForHandover_(name) {
 
 function headerIndexForHandover_(headers) {
   const map = {};
-  headers.forEach(function(h, i) {
-    map[String(h || '').trim().toLowerCase().replace(/\s+/g, '_')] = i;
-  });
-
+  headers.forEach(function(h, i) { map[String(h || '').trim().toLowerCase().replace(/\s+/g, '_')] = i; });
   [
-    'manifest_id', 'manifest_number', 'manifest_date', 'shift', 'shift_name',
-    'drop_point_id', 'sprinter_id', 'sprinter_name', 'sprinter_phone',
-    'seller_id', 'seller_name', 'receiver_name', 'receiver_phone', 'total_awb',
-    'status', 'pdf_file_id', 'pdf_url', 'handover_at', 'completed_at',
-    'updated_at', 'updated_by'
+    'manifest_id','manifest_number','manifest_date','shift','shift_name','drop_point_id','sprinter_id','sprinter_name',
+    'seller_id','seller_name','receiver_name','receiver_phone','total_awb','status','pdf_file_id','pdf_url',
+    'handover_at','completed_at','updated_at','updated_by'
   ].forEach(function(k) {
     if (map[k] === undefined) throw new Error('Kolom MANIFEST wajib: ' + k);
   });
-
   return map;
 }
 
 function headerIndexForHandoverTable_(headers) {
   const map = {};
-  headers.forEach(function(h, i) {
-    map[String(h || '').trim().toLowerCase().replace(/\s+/g, '_')] = i;
-  });
-
-  [
-    'handover_id', 'manifest_id', 'seller_id', 'seller_name', 'handover_at',
-    'handover_by', 'photo_file_id', 'photo_url', 'signature_file_id',
-    'signature_url', 'notes', 'status'
-  ].forEach(function(k) {
+  headers.forEach(function(h, i) { map[String(h || '').trim().toLowerCase().replace(/\s+/g, '_')] = i; });
+  ['handover_id','manifest_id','seller_id','seller_name','receiver_name','handover_at','handover_by','status'].forEach(function(k) {
     if (map[k] === undefined) throw new Error('Kolom HANDOVER wajib: ' + k);
   });
-
   return map;
 }
 
 function sameValueForHandover_(a, b) {
-  return String(a == null ? '' : a).trim().toLowerCase() ===
-    String(b == null ? '' : b).trim().toLowerCase();
+  return String(a == null ? '' : a).trim().toLowerCase() === String(b == null ? '' : b).trim().toLowerCase();
 }
 
 function handoverDateValue_(value) {
   if (!value) return '';
-  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) {
-    return value.toISOString();
-  }
+  if (Object.prototype.toString.call(value) === '[object Date]' && !isNaN(value.getTime())) return value.toISOString();
   return String(value);
 }
 
 function writeHandoverAuditLog_(user, manifestId, manifestNumber, handoverId, timestamp) {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('AUDIT_LOG');
   if (!sheet) return;
-
   sheet.appendRow([
     timestamp,
     user.sprinter_id || '',
@@ -357,12 +284,6 @@ function writeHandoverAuditLog_(user, manifestId, manifestNumber, handoverId, ti
     'COMPLETE_HANDOVER',
     'HANDOVER',
     handoverId,
-    JSON.stringify({
-      manifest_id: manifestId,
-      manifest_number: manifestNumber,
-      mode: 'PHOTO_ONLY',
-      photo_embedded_to_pdf: true,
-      photo_stored_in_drive: false
-    })
+    JSON.stringify({ manifest_id: manifestId, manifest_number: manifestNumber, receiver_name: true, signature_embedded_to_pdf: true, photo_embedded_to_pdf: true })
   ]);
 }
