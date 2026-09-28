@@ -4,6 +4,10 @@ import { Eye, EyeOff, Loader2, ChevronLeft, Calendar, User as UserIcon, MapPin, 
 
 const API_URL = "https://script.google.com/macros/s/AKfycbxzFZV3HMqdRf8_sFQFCZ3qQcIhnRVEXLhzTYGD7OPjv-Q7khAvMdCk8jx90Ff9d10WUw/exec";
 
+const REMEMBER_USERNAME_KEY = 'retur_remember_username';
+const REMEMBER_PASSWORD_KEY = 'retur_remember_password';
+const REMEMBER_ME_KEY = 'retur_remember_me';
+
 const AuthContext = createContext(null);
 
 export const useAuth = () => {
@@ -46,11 +50,28 @@ const BottomNavigation = () => {
 const LoginPage = () => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    try {
+      const savedRememberMe = localStorage.getItem(REMEMBER_ME_KEY) === 'true';
+      const savedUsername = localStorage.getItem(REMEMBER_USERNAME_KEY) || '';
+      const savedPassword = localStorage.getItem(REMEMBER_PASSWORD_KEY) || '';
+
+      if (savedRememberMe) {
+        setRememberMe(true);
+        setUsername(savedUsername);
+        setPassword(savedPassword);
+      }
+    } catch (err) {
+      console.warn('Gagal memuat kredensial tersimpan.', err);
+    }
+  }, []);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -67,6 +88,16 @@ const LoginPage = () => {
       });
       const result = await response.json();
       if (result.success) {
+        if (rememberMe) {
+          localStorage.setItem(REMEMBER_USERNAME_KEY, username);
+          localStorage.setItem(REMEMBER_PASSWORD_KEY, password);
+          localStorage.setItem(REMEMBER_ME_KEY, 'true');
+        } else {
+          localStorage.removeItem(REMEMBER_USERNAME_KEY);
+          localStorage.removeItem(REMEMBER_PASSWORD_KEY);
+          localStorage.removeItem(REMEMBER_ME_KEY);
+        }
+
         login(result.data.user, result.data.token);
         navigate('/');
       } else {
@@ -82,24 +113,34 @@ const LoginPage = () => {
   return (
     <div className="min-h-screen bg-white flex flex-col justify-center px-6 py-12 font-sans max-w-md mx-auto shadow-sm relative z-10">
       <div className="mx-auto w-full">
-        <h2 className="text-center text-3xl font-extrabold tracking-tight text-[#D71920]">J&T EXPRESS</h2>
-        <h3 className="mt-2 text-center text-md font-semibold text-gray-700 tracking-[0.2em]">MANIFEST RETUR</h3>
+        <h1 className="text-center text-4xl font-black tracking-[-0.045em] text-gray-900 leading-tight">
+          Manifest Retur <span className="text-[#D71920]">BGG16</span>
+        </h1>
       </div>
-      <div className="mt-12 mx-auto w-full">
+      <div className="mt-14 mx-auto w-full">
         <form className="space-y-6" onSubmit={handleLogin}>
           {error && <div className="p-4 text-sm text-red-700 bg-red-50 rounded-2xl border border-red-100 flex items-center"><span>{error}</span></div>}
           <div>
             <label className="block text-sm font-semibold leading-6 text-gray-900 mb-2">Username</label>
-            <input type="text" required value={username} onChange={(e) => setUsername(e.target.value)} className="block w-full rounded-2xl border-0 py-4 px-5 text-gray-900 bg-gray-50 shadow-sm ring-1 ring-inset ring-gray-200 focus:ring-2 focus:ring-inset focus:ring-[#D71920] sm:text-sm outline-none transition-all" placeholder="Masukkan username Anda" />
+            <input type="text" required autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} className="block w-full rounded-2xl border-0 py-4 px-5 text-gray-900 bg-gray-50 shadow-sm ring-1 ring-inset ring-gray-200 focus:ring-2 focus:ring-inset focus:ring-[#D71920] sm:text-sm outline-none transition-all" placeholder="Masukkan username Anda" />
           </div>
           <div>
             <label className="block text-sm font-semibold leading-6 text-gray-900 mb-2">Password</label>
             <div className="mt-2 relative">
-              <input type={showPassword ? "text" : "password"} required value={password} onChange={(e) => setPassword(e.target.value)} className="block w-full rounded-2xl border-0 py-4 px-5 pr-12 text-gray-900 bg-gray-50 shadow-sm ring-1 ring-inset ring-gray-200 focus:ring-2 focus:ring-inset focus:ring-[#D71920] sm:text-sm outline-none transition-all" placeholder="Masukkan password Anda" />
-              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute inset-y-0 right-0 flex items-center pr-5 text-gray-400 hover:text-gray-600">{showPassword ? <EyeOff size={20} /> : <Eye size={20} />}</button>
+              <input type={showPassword ? "text" : "password"} required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} className="block w-full rounded-2xl border-0 py-4 px-5 pr-12 text-gray-900 bg-gray-50 shadow-sm ring-1 ring-inset ring-gray-200 focus:ring-2 focus:ring-inset focus:ring-[#D71920] sm:text-sm outline-none transition-all" placeholder="Masukkan password Anda" />
+              <button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? 'Sembunyikan password' : 'Tampilkan password'} className="absolute inset-y-0 right-0 flex items-center pr-5 text-gray-400 hover:text-gray-600">{showPassword ? <EyeOff size={20} /> : <Eye size={20} />}</button>
             </div>
           </div>
-          <div className="pt-4">
+          <label className="flex items-center gap-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={rememberMe}
+              onChange={(e) => setRememberMe(e.target.checked)}
+              className="h-5 w-5 rounded border-gray-300 text-[#D71920] focus:ring-[#D71920] accent-[#D71920]"
+            />
+            <span className="text-sm font-medium text-gray-700">Ingat saya</span>
+          </label>
+          <div className="pt-2">
             <button type="submit" disabled={isLoading} className="flex w-full justify-center items-center rounded-2xl bg-[#D71920] px-3 py-4 text-sm font-bold text-white shadow-md hover:bg-[#B9151B] disabled:opacity-70 transition-colors">
               {isLoading && <Loader2 className="animate-spin mr-2" size={20} />}
               {isLoading ? 'MEMPROSES...' : 'MASUK'}
